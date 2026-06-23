@@ -4,9 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
-	"github.com/NumberMan1/numbox/utils/env"
-	"github.com/dgrijalva/jwt-go"
 	"time"
+
+	"github.com/NumberMan1/numbox/pkg/env"
+	"github.com/dgrijalva/jwt-go"
 )
 
 var (

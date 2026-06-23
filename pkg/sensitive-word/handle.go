@@ -2,10 +2,11 @@ package sensitiveword
 
 import (
 	_ "embed"
-	"github.com/NumberMan1/numbox/utils"
-	"github.com/NumberMan1/numbox/utils/collection"
 	"strings"
 	"unicode"
+
+	"github.com/NumberMan1/numbox/pkg/collection"
+	"github.com/NumberMan1/numbox/pkg/utils"
 )
 
 var sensitiveWordsSet collection.Set[string]

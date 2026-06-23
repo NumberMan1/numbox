@@ -1,5 +1,9 @@
 package utils
 
+import (
+	"cmp"
+)
+
 func DeduplicateAddInt32[T comparable](arr []T, elements ...T) []T {
 	// 使用 map 来记录已经存在的元素，key 为元素值，value 为 true 表示存在
 	exists := make(map[T]bool)
@@ -97,6 +101,18 @@ func SliceContains[T comparable](arr []T, item T) bool {
 	return false
 }
 
+func SliceAllContains[T comparable](arr []T, items ...T) bool {
+	arrColl := SliceToMap(arr, func(val T) (T, bool) {
+		return val, true
+	})
+	for _, item := range items {
+		if !arrColl[item] {
+			return false
+		}
+	}
+	return true
+}
+
 // MergeSliceMaps 合并两个映射
 func MergeSliceMaps[T1, T2 comparable](srcMap, anotherSrcMap map[T1][]T2) map[T1][]T2 {
 	// 创建一个新的映射，容量为两个源映射的总和
@@ -118,4 +134,90 @@ func MergeSliceMaps[T1, T2 comparable](srcMap, anotherSrcMap map[T1][]T2) map[T1
 	}
 
 	return mergedMap
+}
+
+func MaxValue[T Numeric](list []T) T {
+	var maxVal T
+	for _, v := range list {
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	return maxVal
+}
+
+// CompareWithNegOneAsMax 对比两个整数值，
+// 按升序排序但将负数（如 -1）视作最大值。
+// 适配 slices.SortFunc，返回值为：
+// -1 表示 vi < vj
+//
+//	0 表示 vi == vj
+//	1 表示 vi > vj
+func CompareWithNegOneAsMax[T int | int8 | int32 | int64 | uint | uint8 | uint32 | uint64](vi T, vj T) int {
+	if vi == vj {
+		return 0
+	}
+
+	ineg, jneg := vi < 0, vj < 0
+
+	if ineg && !jneg {
+		return 1 // vi 为负数，视为无穷大，所以 vi > vj
+	}
+	if !ineg && jneg {
+		return -1 // vj 为负数，视为无穷大，所以 vi < vj
+	}
+
+	// 符号相同时（同为正数或同为负数），按正常的数值大小进行升序比较
+	return cmp.Compare(vi, vj)
+}
+
+func FormatIntTypeMap[T1 ~int32 | ~int64, T2 int | int8 | int32 | int64 | uint | uint8 | uint32 | uint64](src map[T1]T2) map[int32]int64 {
+	var res = make(map[int32]int64, len(src))
+	for k, v := range src {
+		res[int32(k)] = int64(v)
+	}
+	return res
+}
+
+func ParseIntTypeMap[T1 ~int32 | ~int64, T2 int | int8 | int32 | int64 | uint | uint8 | uint32 | uint64](src map[int32]int64) map[T1]T2 {
+	var res = make(map[T1]T2, len(src))
+	for k, v := range src {
+		res[T1(k)] = T2(v)
+	}
+	return res
+}
+
+func MapToSlice[T1 comparable, T2, T any](src map[T1]T2, fn func(k T1, v T2) (T, bool)) []T {
+	var res = make([]T, 0, len(src))
+	for k, v := range src {
+		val, ok := fn(k, v)
+		if !ok {
+			continue
+		}
+		res = append(res, val)
+	}
+	return res
+}
+
+func BatchSliceGroups[T any](all []T, size int, fn func([]T)) {
+	n := len(all)
+	if n == 0 {
+		return
+	}
+	if size <= 0 || size >= n {
+		fn(all)
+		return
+	}
+	// 逐批次遍历执行（非并发），避免额外边界判断开销
+	for start := 0; start < n; {
+		end := start + size
+		if end > n {
+			end = n
+		}
+		fn(all[start:end])
+		if end == n {
+			break
+		}
+		start = end
+	}
 }

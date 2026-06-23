@@ -12,11 +12,12 @@ const (
 )
 
 // Shuffle 打乱切片中的元素
-func Shuffle[T any](slice []T) {
+func Shuffle[T any](seed int64, slice []T) {
+	r := rand.New(rand.NewSource(uint64(seed)))
 	// Fisher-Yates 洗牌算法
 	for i := len(slice) - 1; i > 0; i-- {
 		// 生成一个 [0, i] 范围内的随机索引
-		j := rand.Intn(i + 1)
+		j := r.Intn(i + 1)
 		// 交换 slice[i] 和 slice[j] 的元素
 		slice[i], slice[j] = slice[j], slice[i]
 	}
@@ -30,37 +31,42 @@ func (f fairWeightItem[T]) Weight() int {
 	return 100
 }
 
-func PickOneFromFairPool[T any](randomSeed int64, slice []T) (res T, ok bool) {
+func newFairWeightPool[T any](randomSeed int64, slice []T) Pool {
 	pool := NewWeightPool(randomSeed)
 	for _, v := range slice {
 		pool.Add(fairWeightItem[T]{v})
 	}
+	return pool
+}
+
+func pickFairItem[T any](pool *Pool) (res T, ok bool) {
 	resItem, ok := pool.PickRandom()
 	if !ok {
 		return
 	}
 	res = resItem.(fairWeightItem[T]).val
 	return
+}
+
+func PickOneFromFairPool[T any](randomSeed int64, slice []T) (res T, ok bool) {
+	pool := newFairWeightPool(randomSeed, slice)
+	return pickFairItem[T](&pool)
 }
 
 func PickOneFromFairPoolWithoutSeed[T any](slice []T) (res T, ok bool) {
-	pool := NewWeightPool(time.Now().UnixNano())
-	for _, v := range slice {
-		pool.Add(fairWeightItem[T]{v})
-	}
-	resItem, ok := pool.PickRandom()
-	if !ok {
-		return
-	}
-	res = resItem.(fairWeightItem[T]).val
-	return
+	return PickOneFromFairPool(time.Now().UnixNano(), slice)
 }
 
-func PickOneFromItems[T Item](randomSeed int64, weightItems ...T) (res T, ok bool) {
+func newItemWeightPool[T Item](randomSeed int64, weightItems []T) Pool {
 	pool := NewWeightPool(randomSeed)
 	for _, weightItem := range weightItems {
 		pool.Add(weightItem)
 	}
+	return pool
+}
+
+func PickOneFromItems[T Item](randomSeed int64, weightItems ...T) (res T, ok bool) {
+	pool := newItemWeightPool(randomSeed, weightItems)
 	resItem, ok := pool.PickRandom()
 	if !ok {
 		return
@@ -70,10 +76,7 @@ func PickOneFromItems[T Item](randomSeed int64, weightItems ...T) (res T, ok boo
 }
 
 func PickManyFromFairPool[T any](pickCount int, randomSeed int64, slice []T) (res []T) {
-	pool := NewWeightPool(randomSeed)
-	for _, v := range slice {
-		pool.Add(fairWeightItem[T]{v})
-	}
+	pool := newFairWeightPool(randomSeed, slice)
 	for _, pickedItem := range pool.PickManyRandom(pickCount) {
 		res = append(res, pickedItem.(fairWeightItem[T]).val)
 	}
@@ -81,10 +84,7 @@ func PickManyFromFairPool[T any](pickCount int, randomSeed int64, slice []T) (re
 }
 
 func PickManyFromItems[T Item](pickCount int, randomSeed int64, weightItems ...T) (res []T) {
-	pool := NewWeightPool(randomSeed)
-	for _, weightItem := range weightItems {
-		pool.Add(weightItem)
-	}
+	pool := newItemWeightPool(randomSeed, weightItems)
 	for _, pickedItem := range pool.PickManyRandom(pickCount) {
 		res = append(res, pickedItem.(T))
 	}
@@ -92,10 +92,7 @@ func PickManyFromItems[T Item](pickCount int, randomSeed int64, weightItems ...T
 }
 
 func PickOneFromItemsWithTotalWeight[T Item](randomSeed int64, totalWeight int, weightItems ...T) (res T, ok bool) {
-	pool := NewWeightPool(randomSeed)
-	for _, weightItem := range weightItems {
-		pool.Add(weightItem)
-	}
+	pool := newItemWeightPool(randomSeed, weightItems)
 	pool.SetTotalWeight(totalWeight)
 	pickItem, ok := pool.PickRandom()
 	if !ok {
@@ -113,7 +110,8 @@ func NewWeightPool(randSeeds ...int64) Pool {
 	return Pool{
 		randSeed:    randSeed,
 		rand:        rand.New(rand.NewSource(uint64(randSeed))),
-		Items:       nil,
+		Items:       make([]Item, 0, 8), // 预分配一点容量，减少初期扩容
+		cum:         make([]int, 0, 8),
 		totalWeight: 0,
 	}
 }
@@ -127,6 +125,7 @@ type Pool struct {
 	rand        *rand.Rand
 	Items       []Item
 	totalWeight int
+	cum         []int // 内部维护的累加权重，对外部完全透明
 }
 
 func (p *Pool) Length() int {
@@ -136,10 +135,15 @@ func (p *Pool) Length() int {
 func (p *Pool) Add(item Item) {
 	p.Items = append(p.Items, item)
 	p.totalWeight += item.Weight()
+	p.cum = append(p.cum, p.totalWeight)
 }
 
 func (p *Pool) SetTotalWeight(totalWeight int) {
 	p.totalWeight = totalWeight
+}
+
+func (p *Pool) GetTotalWeight() int {
+	return p.totalWeight
 }
 
 func (p *Pool) SetRandomSeed(seed int64) {
@@ -150,6 +154,7 @@ func (p *Pool) SetRandomSeed(seed int64) {
 func (p *Pool) Copy() Pool {
 	newPool := NewWeightPool(p.randSeed)
 	newPool.Items = append([]Item{}, p.Items...)
+	newPool.cum = append([]int(nil), p.cum...)
 	newPool.totalWeight = p.totalWeight
 	return newPool
 }
@@ -157,7 +162,7 @@ func (p *Pool) Copy() Pool {
 // PickManyRandom picks up to pickCount items, skipping misses if r exceeds sum of weights.
 func (p *Pool) PickManyRandom(pickCount int) []Item {
 	if len(p.Items) <= pickCount {
-		Shuffle(p.Items)
+		Shuffle(p.randSeed, p.Items)
 		return p.Items
 	}
 	newPool := p.Copy()
@@ -184,21 +189,12 @@ func (p *Pool) PickRandom() (Item, bool) {
 		p.totalWeight = 0
 		return item, true
 	}
-	// build cumulative weights
-	sum := 0
-	cum := make([]int, n)
-	for i, it := range p.Items {
-		sum += it.Weight()
-		cum[i] = sum
-	}
-	// draw
 	r := p.rand.Intn(p.totalWeight) + 1
-	if r > sum {
-		// miss
+	if len(p.cum) > 0 && r > p.cum[len(p.cum)-1] {
 		return nil, false
 	}
-	// find slot
-	idx := sort.Search(n, func(i int) bool { return cum[i] >= r })
+
+	idx := sort.Search(n, func(i int) bool { return p.cum[i] >= r })
 	if idx < 0 || idx >= n {
 		return nil, false
 	}
@@ -206,6 +202,13 @@ func (p *Pool) PickRandom() (Item, bool) {
 	item := p.Items[idx]
 	p.Items = append(p.Items[:idx], p.Items[idx+1:]...)
 	p.totalWeight -= item.Weight()
+
+	p.cum = p.cum[:len(p.Items)]
+	sum := 0
+	for i, it := range p.Items {
+		sum += it.Weight()
+		p.cum[i] = sum
+	}
 	return item, true
 }
 
@@ -216,22 +219,12 @@ func (p *Pool) PickRandomAndPutBack() (Item, bool) {
 		return nil, false
 	}
 
-	// 1. 构建临时累加权重 (如果需要极致性能且池子静态，建议在 Pool 结构体中缓存此切片)
-	sum := 0
-	cum := make([]int, n)
-	for i, it := range p.Items {
-		sum += it.Weight()
-		cum[i] = sum
-	}
-
-	// 2. 使用内部随机生成器 draw
 	r := p.rand.Intn(p.totalWeight) + 1
-	if r > sum {
+	if len(p.cum) > 0 && r > p.cum[len(p.cum)-1] {
 		return nil, false
 	}
-
-	// 3. 二分查找命中区间 (O(log N))
-	idx := sort.Search(n, func(i int) bool { return cum[i] >= r })
+	// 二分查找命中区间 (O(log N))
+	idx := sort.Search(n, func(i int) bool { return p.cum[i] >= r })
 	if idx < n {
 		return p.Items[idx], true
 	}
@@ -246,23 +239,15 @@ func (p *Pool) PickRandomManyAndPutBack(pickCount int) []Item {
 		return nil
 	}
 
-	// 1. 预计算累加权重 (仅计算一次)
-	sum := 0
-	cum := make([]int, n)
-	for i, it := range p.Items {
-		sum += it.Weight()
-		cum[i] = sum
-	}
-
 	res := make([]Item, 0, pickCount)
 	for i := 0; i < pickCount; i++ {
 		r := p.rand.Intn(p.totalWeight) + 1
-		if r > sum {
+		if len(p.cum) > 0 && r > p.cum[len(p.cum)-1] {
 			continue // 命中空位，模拟 PickManyRandom 跳过逻辑
 		}
 
-		// 2. 每次抽取仅需 O(log N)
-		idx := sort.Search(n, func(i int) bool { return cum[i] >= r })
+		// 每次抽取仅需 O(log N)
+		idx := sort.Search(n, func(i int) bool { return p.cum[i] >= r })
 		if idx < n {
 			res = append(res, p.Items[idx])
 		}

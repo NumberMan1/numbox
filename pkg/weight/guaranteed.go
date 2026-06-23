@@ -204,7 +204,7 @@ func PickManyFromGuaranteedItems[T GuaranteedItem](pickCount int, randomSeed int
 		for i, it := range items {
 			res[i] = it
 		}
-		Shuffle(res) // Using Shuffle from the original `weight.go` file.
+		Shuffle(randomSeed, res) // Using Shuffle from the original `weight.go` file.
 		return res
 	}
 

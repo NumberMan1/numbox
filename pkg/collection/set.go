@@ -1,8 +1,6 @@
 package collection
 
-import (
-	"github.com/NumberMan1/numbox/utils"
-)
+import "github.com/NumberMan1/numbox/pkg/utils"
 
 func NewSet[T comparable](items ...T) Set[T] {
 	var res = make(Set[T], len(items))
