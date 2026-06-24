@@ -17,13 +17,13 @@ func Must(err error) {
 	}
 }
 
-func Asset(isOk bool, err error) {
+func Assert(isOk bool, err error) {
 	if !isOk {
 		panic(err)
 	}
 }
 
-func AssetStringError(isOk bool, str string) {
+func AssertStringError(isOk bool, str string) {
 	if !isOk {
 		panic(fmt.Errorf("%s", str))
 	}
