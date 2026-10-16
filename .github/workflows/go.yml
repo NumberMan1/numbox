@@ -1,0 +1,36 @@
+name: Go
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # The CGo skiplist uses POSIX random(); run the full suite on Linux.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CGO_ENABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          # The historical repository has no go.sum yet.
+          cache: false
+      - name: Download and verify dependencies
+        run: |
+          go mod download all
+          go mod verify
+      - name: Tests and race detection
+        run: go test -race -count=1 ./...
+      - name: Static analysis
+        run: go vet ./...
