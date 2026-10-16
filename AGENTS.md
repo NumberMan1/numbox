@@ -2,6 +2,12 @@
 
 此文件为在本仓库中工作的 AI 编程助手提供通用指导，适用于整个仓库。
 
+## 分支与操作授权
+
+- 开发修改位于 `develop` 分支。
+- 完成修改与验证后先汇报，只有获得用户对本次操作的明确授权才执行 commit、push 或 PR 合并。
+- 对 `master` 的提交、推送或合并需要用户明确授权；历史任务的授权不自动延续到新的修改。
+
 ## 构建与测试
 
 ```bash
@@ -33,10 +39,12 @@ CGO_ENABLED=1 go build ./...
 **函数选项模式（Functional Options）** 在 `pkg/lock` 中用于 `Lock()`/`Unlock()` 的配置（`LockOption`、`UnlockOption`）。为其他包添加可配置行为时，请遵循此模式。
 
 **锁包（`pkg/lock`）** 提供两种实现：
-- `Locker` — 基于 sync.Mutex 的简单锁，具备基于 token 的所有权、获取超时和持锁过期机制。获取锁失败时会 panic `ErrLockTimeout`，调用方需要 `recover()` 来捕获。
+- `Locker` — 带 token 的进程内互斥锁，持有权不会自动过期，必须显式释放。`Lock` 等待超时时 panic `ErrLockTimeout`；`LockContext` 通过 error 返回超时或取消。
 - `RWLocker` — 读写锁，通过 `writeIntention` 计数器实现写者优先。多个读者可以同时持锁；当有写意向时，新的读锁请求会被阻塞。
 
-锁等待均使用指数退避轮询（`withTimeout`），而非 channel 机制。
+锁获取阶段使用可取消、有上限的退避轮询（`waitForLock`）。`Do`/`DoRead` 在锁内同步执行任务，任务超时只取消传入的 context；必须等待任务真正退出后才解锁。不得通过后台 goroutine 加超时返回来提前释放锁。任务函数还须等待自己启动的临界区子任务结束后才能返回。
+
+`WithTaskTimeout` 只用于 `Do`/`DoRead`，与获取阶段的 `WithAcquireTimeout` 分离。旧 `WithLockHoldTimeout` 是任务超时选项的弃用别名，`DefaultHoldLockExpired` 不再生效。迁移规则见 `pkg/lock/README.md`。
 
 **权重池（`pkg/weight`）** 基于累计权重的二分查找实现加权随机选取（O(log N)）。`Item` 接口要求实现 `Weight() int` 方法。泛型便捷函数（`PickOneFromItems[T Item]`、`PickManyFromFairPool[T]` 等）封装了常见使用场景。`PickRandom()` 为不放回抽样——若需放回抽样，使用 `PickRandomAndPutBack()`。
 
