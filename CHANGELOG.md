@@ -23,6 +23,10 @@
 - Issue / PR 模板、CODEOWNERS、Dependabot、编辑器与换行配置。
 - Ubuntu 上的 Go 测试、竞态检测和静态检查工作流。
 
+### 依赖
+
+- 升级 `actions/checkout`、`actions/setup-go` 至 v7，并升级 `testify` 至 1.12.1。
+
 ### 文档
 
 - 补充安装、快速开始、工具索引与 CGo / POSIX 构建要求。

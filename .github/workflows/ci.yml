@@ -31,13 +31,13 @@ jobs:
         shell: bash
     steps:
       - name: Check out source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Check dependency files are tracked
         run: git ls-files --error-unmatch go.mod go.sum
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
