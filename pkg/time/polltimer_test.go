@@ -1,5 +1,5 @@
 // Adapted from github.com/NumberMan1/orbit (81cbe7b).
-// Copyright (c) 2025 NumberMan1. See third_party/ORBIT_LICENSE.
+// Copyright (c) 2025 NumberMan1. See LICENSE in the repository root.
 
 package time
 

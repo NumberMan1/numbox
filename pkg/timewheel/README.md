@@ -60,4 +60,8 @@ func main() {
 go test ./pkg/timewheel -run '^$' -bench 'Benchmark(Wheel|Runtime)ScheduleCancel' -benchmem
 ```
 
-该基准只比较 10,000 个远期任务的取消和重建，不包含到期执行、并发或整体调度延迟，不能代表全部业务负载。Orbit 来源实现的许可见 [ORBIT_LICENSE](../../third_party/ORBIT_LICENSE)。
+该基准只比较 10,000 个远期任务的取消和重建，不包含到期执行、并发或整体调度延迟，不能代表全部业务负载。
+
+## 许可证
+
+本库采用 [MIT License](../../LICENSE)。
