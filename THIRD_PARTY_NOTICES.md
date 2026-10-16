@@ -22,9 +22,9 @@
 
 | 路径 | 当前证据与需要确认的内容 |
 | --- | --- |
-| `utils/skiplist/skiplist.go`、`type.go` | 常量、结构和注释与 [sean-public/fast-skiplist](https://github.com/sean-public/fast-skiplist) 存在相似之处，这是来源线索，尚未确认实际引入版本或中间 fork。 |
-| `utils/go-zset/skiplist.c`、`skiplist.h` | 本地注释说明实现类似 Redis；[xjdrew/lua-zset](https://github.com/xjdrew/lua-zset) 提供了相似实现，其 README 说明跳表来自 Redis。实际引入链、版本及各方授权仍需确认。 |
-| `utils/sensitive-word/sensitive_word.json` | 仓库没有说明词表的原始来源、生成方式或许可，需确认是否为原创或取得可再分发授权。 |
+| `pkg/skiplist/skiplist.go`、`type.go` | 常量、结构和注释与 [sean-public/fast-skiplist](https://github.com/sean-public/fast-skiplist) 存在相似之处，这是来源线索，尚未确认实际引入版本或中间 fork。 |
+| `pkg/go-zset/skiplist.c`、`skiplist.h` | 本地注释说明实现类似 Redis；[xjdrew/lua-zset](https://github.com/xjdrew/lua-zset) 提供了相似实现，其 README 说明跳表来自 Redis。实际引入链、版本及各方授权仍需确认。 |
+| `pkg/sensitive-word/sensitive_word.json` | 仓库没有说明词表的原始来源、生成方式或许可，需确认是否为原创或取得可再分发授权。 |
 
 代码相似性不能单独证明来源或授权，不据此给这些内容补写猜测的作者、年份或许可。
 完成来源核对前，不应宣称上述历史内嵌内容已统一获得 MIT 授权。

@@ -38,3 +38,6 @@ Thumbs.db
 .env.*
 !.env.example
 !.env.sample
+
+# Keep dependency checksums even when a global ignore rule excludes them.
+!/go.sum

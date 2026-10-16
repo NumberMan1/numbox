@@ -11,10 +11,10 @@ Bug 报告请附上版本、Go 版本、运行环境及不依赖私有服务的�
 
 ## 本地开发
 
-要求 Go 1.24.0 或以上版本，模块路径为 `github.com/NumberMan1/numbox`。
+要求 Go 1.25.1 或以上版本，模块路径为 `github.com/NumberMan1/numbox`。
 
-`utils/go-zset` 通过 CGo 编译 C 跳表，完整检查需要启用 CGo 和可用的 C 编译器。
-该 C 实现使用 POSIX `random()`，目前 CI 在 Ubuntu 上运行；
+`pkg/go-zset` 通过 CGo 编译 C 跳表，完整检查需要启用 CGo 和可用的 C 编译器。
+该 C 实现使用 POSIX `random()`，目前 CI 在 Ubuntu 和 macOS 上运行；
 Windows 完整构建建议使用 WSL。其他工具包可按需单独导入，不会因此编译 go-zset。
 
 在仓库根目录运行：
@@ -42,7 +42,8 @@ git diff --check
 
 ## Pull Request
 
-从 fork 创建分支，一次 PR 聚焦一个问题。描述解决的问题、行为变化、兼容性和实际验证结果；
+从 fork 创建分支，并以 `develop` 为 PR 目标，一次 PR 聚焦一个问题。`master` 由维护者明确授权后从 `develop` 合入。
+描述解决的问题、行为变化、兼容性和实际验证结果；
 未执行或失败的检查要明确说明原因。提交前自查 diff，避免无关格式化。
 
 维护者评审通过后合并。提交贡献表示你有权提供这些内容，
