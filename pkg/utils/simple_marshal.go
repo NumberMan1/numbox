@@ -5,27 +5,18 @@ import (
 )
 
 func MarshalMapToString[T1 comparable, T2 any](splitStr string, src map[T1]T2, fn func(k T1, v T2) string) string {
-	var res string
+	parts := make([]string, 0, len(src))
 	for key, val := range src {
-		if res == "" {
-			res += fn(key, val)
-			continue
-		}
-		res += splitStr + fn(key, val)
+		parts = append(parts, fn(key, val))
 	}
-	return res
+	return strings.Join(parts, splitStr)
 }
-
 func MarshalSliceToString[T any](splitStr string, src []T, fn func(T) string) string {
-	var res string
+	parts := make([]string, 0, len(src))
 	for _, val := range src {
-		if res == "" {
-			res += fn(val)
-			continue
-		}
-		res += splitStr + fn(val)
+		parts = append(parts, fn(val))
 	}
-	return res
+	return strings.Join(parts, splitStr)
 }
 
 func UnmarshalStringToSlice[T any](splitStr string, src string, fn func(int, string) (T, bool)) []T {

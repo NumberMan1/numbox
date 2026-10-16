@@ -1,7 +1,5 @@
 package collection
 
-import "github.com/NumberMan1/numbox/pkg/utils"
-
 func NewSet[T comparable](items ...T) Set[T] {
 	var res = make(Set[T], len(items))
 	res.Add(items...)
@@ -35,5 +33,9 @@ func (set Set[T]) ContainsAny(items ...T) bool {
 }
 
 func (set Set[T]) All() []T {
-	return utils.MapKeys(set)
+	items := make([]T, 0, len(set))
+	for item := range set {
+		items = append(items, item)
+	}
+	return items
 }

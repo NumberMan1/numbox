@@ -1,6 +1,9 @@
 package bitmap
 
-import "fmt"
+import (
+	"bytes"
+	"fmt"
+)
 
 // BitMap 是一个位图数据结构。
 // 它使用一个字节切片来存储大量的布尔标记，非常节省内存。
@@ -76,15 +79,15 @@ func (bm *BitMap) Max() uint32 {
 // Bits 返回位图底层的字节切片。
 // 这可以用于序列化和持久化存储。
 func (bm *BitMap) Bits() []byte {
-	return bm.bits
+	return bytes.Clone(bm.bits)
 }
 
 // SetBits 使用一个已有的字节切片重置位图。
 // 这通常用于从持久化存储中恢复位图状态。
 func (bm *BitMap) SetBits(b []byte) {
-	bm.bits = b
-	// 重置后需要重新计算元素数量
-	bm.recount()
+	if err := bm.Load(b); err != nil {
+		panic(err)
+	}
 }
 
 // String 返回位图内容的字符串表示，方便调试。
@@ -107,4 +110,18 @@ func (bm *BitMap) recount() {
 			bm.count++
 		}
 	}
+}
+
+// Load validates and copies serialized bytes before changing the bitmap.
+func (bm *BitMap) Load(data []byte) error {
+	expected := int((uint64(bm.maxVal) + 8) / 8)
+	if len(data) != expected {
+		return fmt.Errorf("bitmap: expected %d bytes, got %d", expected, len(data))
+	}
+	if tail := (uint64(bm.maxVal) + 1) % 8; tail != 0 && data[len(data)-1]>>tail != 0 {
+		return fmt.Errorf("bitmap: nonzero padding bits")
+	}
+	bm.bits = bytes.Clone(data)
+	bm.recount()
+	return nil
 }

@@ -72,13 +72,14 @@ func (l *rwLocker) Lock(opt ...LockOption) (token Token) {
 
 // 释放写锁
 func (l *rwLocker) Unlock(token Token, opt ...UnlockOption) bool {
+	conf := newUnlockConfig(opt...)
 	l.mutex.Lock()
-	defer l.mutex.Unlock()
 	if l.token != token || l.write == 0 {
+		l.mutex.Unlock()
 		return false
 	}
-	conf := newUnlockConfig(opt...)
 	l.write = 0
+	l.mutex.Unlock()
 	conf.cb.invoke()
 	return true
 }
@@ -115,13 +116,13 @@ func (l *rwLocker) RLock(opt ...LockOption) (token Token) {
 
 // 释放读锁
 func (l *rwLocker) RUnlock(token Token, opt ...UnlockOption) bool {
+	conf := newUnlockConfig(opt...)
 	l.mutex.Lock()
-	defer l.mutex.Unlock()
 	expireAt, ok := l.readTokens[token]
 	delete(l.readTokens, token)
 	success := ok && time.Now().Before(expireAt)
+	l.mutex.Unlock()
 	if success {
-		conf := newUnlockConfig(opt...)
 		conf.cb.invoke()
 	}
 	return success

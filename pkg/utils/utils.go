@@ -98,23 +98,37 @@ var durationMap = map[string]time.Duration{
 	"周":  7 * 24 * time.Hour,
 }
 
-func ParseCNDuration(input string) (time.Duration, error) {
-	re := regexp.MustCompile(`(\d+)(毫秒|秒钟|秒|分钟|分|小时|天|周)`)
-	matches := re.FindAllStringSubmatch(input, -1)
+var cnDurationPattern = regexp.MustCompile(`(\d+)(毫秒|秒钟|秒|分钟|分|小时|天|周)`)
 
-	var totalDuration time.Duration
+// ParseCNDuration parses complete, non-negative Chinese duration expressions.
+// Unknown text, partial matches and time.Duration overflow are errors.
+func ParseCNDuration(input string) (time.Duration, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return 0, fmt.Errorf("empty duration")
+	}
+	matches := cnDurationPattern.FindAllStringSubmatchIndex(input, -1)
+	var total time.Duration
+	end := 0
 	for _, match := range matches {
-		value, err := strconv.Atoi(match[1])
+		if strings.TrimSpace(input[end:match[0]]) != "" {
+			return 0, fmt.Errorf("invalid duration: %q", input)
+		}
+		value, err := strconv.ParseUint(input[match[2]:match[3]], 10, 64)
 		if err != nil {
 			return 0, err
 		}
-		unit, exists := durationMap[match[2]]
-		if !exists {
-			return 0, fmt.Errorf("未知的时间单位: %s", match[2])
+		unit := durationMap[input[match[4]:match[5]]]
+		if value > uint64((time.Duration(1<<63-1)-total)/unit) {
+			return 0, fmt.Errorf("duration overflow: %q", input)
 		}
-		totalDuration += time.Duration(value) * unit
+		total += time.Duration(value) * unit
+		end = match[1]
 	}
-	return totalDuration, nil
+	if len(matches) == 0 || strings.TrimSpace(input[end:]) != "" {
+		return 0, fmt.Errorf("invalid duration: %q", input)
+	}
+	return total, nil
 }
 
 func ParsePercentageToPermille(input string) (int, error) {
@@ -133,6 +147,9 @@ func ParsePercentageToPermille(input string) (int, error) {
 
 	// 计算千分比并四舍五入
 	permille := math.Round(value * 10)
+	if math.IsNaN(permille) || math.IsInf(permille, 0) || permille >= float64(int(^uint(0)>>1)) || permille < -float64(int(^uint(0)>>1))-1 {
+		return 0, fmt.Errorf("percentage outside integer range")
+	}
 	return int(permille), nil
 }
 

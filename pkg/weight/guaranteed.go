@@ -1,7 +1,3 @@
-// Filename: guaranteed.go
-// This file should be placed in the same 'weight' package as your existing 'weight.go'.
-// It depends on the 'Item' interface and 'Shuffle' function from that file.
-
 package weight
 
 import (
@@ -30,6 +26,7 @@ type GuaranteedItem interface {
 type guaranteedItemState struct {
 	item      GuaranteedItem
 	missTimes int
+	weight    int
 }
 
 // GuaranteedPool is a random-weighted pool that supports guaranteed picks.
@@ -60,12 +57,20 @@ func NewGuaranteedPool(randSeeds ...int64) *GuaranteedPool {
 // Add adds a new GuaranteedItem to the pool.
 // The initial miss count is taken from the item's MissTimes() method.
 func (p *GuaranteedPool) Add(item GuaranteedItem) {
+	if item == nil {
+		panic("weight: nil item")
+	}
+	weight := item.Weight()
+	if weight < 0 || weight > int(^uint(0)>>1)-p.totalWeight {
+		panic("weight: negative or overflowing weight")
+	}
 	state := &guaranteedItemState{
+		weight:    weight,
 		item:      item,
 		missTimes: item.MissTimes(), // Use the initial miss count from the item.
 	}
 	p.items = append(p.items, state)
-	p.totalWeight += item.Weight()
+	p.totalWeight += weight
 }
 
 // Length returns the number of items currently in the pool.
@@ -77,6 +82,13 @@ func (p *GuaranteedPool) Length() int {
 // If a random number is greater than the sum of weights of items in the pool but less than
 // or equal to this totalWeight, it's considered a "miss", and no item is picked.
 func (p *GuaranteedPool) SetTotalWeight(totalWeight int) {
+	sum := 0
+	for _, state := range p.items {
+		sum += state.weight
+	}
+	if totalWeight < sum {
+		panic("weight: total weight is less than item weights")
+	}
 	p.totalWeight = totalWeight
 }
 
@@ -117,7 +129,7 @@ func (p *GuaranteedPool) PickRandom() (GuaranteedItem, bool) {
 		sum := 0
 		cum := make([]int, len(p.items))
 		for i, s := range p.items {
-			sum += s.item.Weight()
+			sum += s.weight
 			cum[i] = sum
 		}
 
@@ -127,6 +139,15 @@ func (p *GuaranteedPool) PickRandom() (GuaranteedItem, bool) {
 			effectiveTotalWeight = sum
 		}
 
+		// Zero-weight items may still reach their guarantee after missed attempts.
+		if effectiveTotalWeight <= 0 {
+			for _, state := range p.items {
+				if state.missTimes < int(^uint(0)>>1) {
+					state.missTimes = min(state.missTimes, int(^uint(0)>>1)-1) + 1
+				}
+			}
+			return nil, false
+		}
 		// Draw a random number.
 		r := p.rand.Intn(effectiveTotalWeight) + 1
 
@@ -134,7 +155,7 @@ func (p *GuaranteedPool) PickRandom() (GuaranteedItem, bool) {
 			// This is a "miss". No item is picked.
 			// Increment miss times for ALL items and return.
 			for _, state := range p.items {
-				state.missTimes++
+				state.missTimes = min(state.missTimes, int(^uint(0)>>1)-1) + 1
 			}
 			return nil, false
 		}
@@ -157,7 +178,7 @@ func (p *GuaranteedPool) PickRandom() (GuaranteedItem, bool) {
 	// Update miss times: increment for all non-picked items.
 	for i, state := range p.items {
 		if i != pickedIndex {
-			state.missTimes++
+			state.missTimes = min(state.missTimes, int(^uint(0)>>1)-1) + 1
 		}
 	}
 	// Reset the miss counter for the picked item.
@@ -165,8 +186,10 @@ func (p *GuaranteedPool) PickRandom() (GuaranteedItem, bool) {
 	// This logic is sound because the state is removed along with the item.
 
 	// 5. Remove the picked item from the pool.
-	p.totalWeight -= pickedItem.Weight()
-	p.items = append(p.items[:pickedIndex], p.items[pickedIndex+1:]...)
+	p.totalWeight -= p.items[pickedIndex].weight
+	copy(p.items[pickedIndex:], p.items[pickedIndex+1:])
+	p.items[len(p.items)-1] = nil
+	p.items = p.items[:len(p.items)-1]
 
 	return pickedItem, true
 }
@@ -198,19 +221,9 @@ func PickManyFromGuaranteedItems[T GuaranteedItem](pickCount int, randomSeed int
 		pool.Add(item)
 	}
 
-	// If we need to pick all or more than available, shuffle and return all items.
-	if pool.Length() <= pickCount {
-		res := make([]T, len(items))
-		for i, it := range items {
-			res[i] = it
-		}
-		Shuffle(randomSeed, res) // Using Shuffle from the original `weight.go` file.
-		return res
-	}
-
 	// Pick items one by one from the pool.
-	pickedItems := make([]T, 0, pickCount)
-	for i := 0; i < pickCount; i++ {
+	pickedItems := make([]T, 0, min(pickCount, len(items)))
+	for i := 0; i < pickCount && pool.Length() > 0; i++ {
 		item, ok := pool.PickRandom()
 		if ok {
 			pickedItems = append(pickedItems, item.(T))

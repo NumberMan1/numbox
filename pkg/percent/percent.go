@@ -31,13 +31,25 @@ func (per Percent) Float64() float64 {
 }
 
 func (per Percent) Hit() bool {
+	if per <= ZeroPercent {
+		return false
+	}
+	if per >= FullPercent {
+		return true
+	}
 	randRes := rand.Intn(FullPercent.Int())
-	return randRes <= per.Int()
+	return randRes < per.Int()
 }
 
 func (per Percent) HitBySeed(seed int64) bool {
+	if per <= ZeroPercent {
+		return false
+	}
+	if per >= FullPercent {
+		return true
+	}
 	randRes := rand.New(rand.NewSource(uint64(seed))).Intn(FullPercent.Int())
-	return randRes <= per.Int()
+	return randRes < per.Int()
 }
 
 func (per Percent) Multiply(val Percent) Percent {
@@ -57,8 +69,10 @@ func (per Percent) MultiplyByInt64(val int64) int64 {
 }
 
 func GetPercentByDivide[T int | int8 | int32 | int64](dividend, divisor T) Percent {
-	result := math.Ceil(float64(dividend) / float64(divisor))
-	result = result * 1000
+	if divisor == 0 {
+		panic("percent: division by zero")
+	}
+	result := float64(dividend) / float64(divisor) * 1000
 	return Percent(result)
 }
 
@@ -79,7 +93,9 @@ func (per Percent) MultiplyByInt64Ceil(val int64) int64 {
 }
 
 func GetPercentByDivideCeil[T int | int8 | int32 | int64](dividend, divisor T) Percent {
-	result := float64(dividend) / float64(divisor)
-	result = math.Ceil(result * 1000)
+	if divisor == 0 {
+		panic("percent: division by zero")
+	}
+	result := math.Ceil(float64(dividend) / float64(divisor) * 1000)
 	return Percent(result)
 }

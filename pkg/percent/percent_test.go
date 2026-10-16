@@ -1,32 +1,38 @@
 package percent
 
 import (
-	"fmt"
+	"golang.org/x/exp/rand"
 	"testing"
-	"time"
 )
 
-func TestPercent(t *testing.T) {
-	var (
-		randomSeed                = time.Now().UnixMilli()
-		per               Percent = 700
-		totalTimes        int64
-		totalSucceedTimes int64
-	)
-	for times := 0; times < 1000; times++ {
-		var nodeNo int64
-		for nodeNo = 102001; nodeNo < 102018; nodeNo++ {
-			for i := 0; i < 3; i++ {
-				totalTimes++
-				testRandomSeed := randomSeed*1000000 + nodeNo*1000 + int64(i+1)
-				if per.HitBySeed(testRandomSeed) {
-					totalSucceedTimes++
-				}
+func TestHitBoundsAndExactThreshold(t *testing.T) {
+	for seed := int64(0); seed < 10000; seed++ {
+		draw := rand.New(rand.NewSource(uint64(seed))).Intn(1000)
+		for _, p := range []Percent{-1, 0, 1, 500, 999, 1000, 1001} {
+			want := draw < int(p)
+			if got := p.HitBySeed(seed); got != want {
+				t.Fatalf("seed=%d draw=%d p=%d: %v, want %v", seed, draw, p, got, want)
 			}
 		}
+		if ZeroPercent.Hit() || !FullPercent.Hit() {
+			t.Fatal("invalid probability bound")
+		}
 	}
-
-	fmt.Println("total times:", totalTimes)
-	fmt.Println("total succeed times:", totalSucceedTimes)
-	fmt.Println("average succeed times:", totalSucceedTimes/1000)
+}
+func TestDivideRounding(t *testing.T) {
+	if got := GetPercentByDivide(1, 3); got != 333 {
+		t.Fatal(got)
+	}
+	if got := GetPercentByDivideCeil(1, 3); got != 334 {
+		t.Fatal(got)
+	}
+	if got := GetPercentByDivide(1, 2); got != 500 {
+		t.Fatal(got)
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("zero divisor accepted")
+		}
+	}()
+	GetPercentByDivide(1, 0)
 }

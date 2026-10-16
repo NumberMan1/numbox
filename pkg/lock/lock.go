@@ -52,19 +52,22 @@ func (l *locker) Lock(opt ...LockOption) (token Token) {
 
 // 解锁
 func (l *locker) Unlock(token Token, opt ...UnlockOption) bool {
+	conf := newUnlockConfig(opt...)
 	l.mutex.Lock()
-	defer l.mutex.Unlock()
-
-	if l.token != token {
+	if l.token != token || l.write == 0 {
+		l.mutex.Unlock()
 		return false
 	}
 	l.write = 0
-	conf := newUnlockConfig(opt...)
+	l.mutex.Unlock()
+	// User callbacks may query or acquire this lock.
 	conf.cb.invoke()
 	return true
 }
 
 // 是否持有锁
 func (l *locker) Acquired(tk Token) bool {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
 	return l.write == 1 && l.token == tk && time.Now().Before(l.expireAt)
 }

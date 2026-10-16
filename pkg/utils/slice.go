@@ -21,6 +21,7 @@ func DeduplicateAddInt32[T comparable](arr []T, elements ...T) []T {
 	for _, element := range elements {
 		if !exists[element] {
 			result = append(result, element)
+			exists[element] = true
 		}
 	}
 
@@ -137,8 +138,12 @@ func MergeSliceMaps[T1, T2 comparable](srcMap, anotherSrcMap map[T1][]T2) map[T1
 }
 
 func MaxValue[T Numeric](list []T) T {
-	var maxVal T
-	for _, v := range list {
+	if len(list) == 0 {
+		var zero T
+		return zero
+	}
+	maxVal := list[0]
+	for _, v := range list[1:] {
 		if v > maxVal {
 			maxVal = v
 		}

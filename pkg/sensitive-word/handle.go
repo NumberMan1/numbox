@@ -2,14 +2,14 @@ package sensitiveword
 
 import (
 	_ "embed"
-	"strings"
 	"unicode"
+	"unicode/utf8"
 
-	"github.com/NumberMan1/numbox/pkg/collection"
+	"github.com/NumberMan1/numbox/pkg/matcher"
 	"github.com/NumberMan1/numbox/pkg/utils"
 )
 
-var sensitiveWordsSet collection.Set[string]
+var sensitiveMatcher *matcher.Matcher
 
 //go:embed sensitive_word.json
 var sensitiveWordsJson string
@@ -17,17 +17,12 @@ var sensitiveWordsJson string
 func init() {
 	var sensitiveWords []string
 	utils.UnmarshalFromJSON(sensitiveWordsJson, &sensitiveWords)
-	sensitiveWordsSet = collection.NewSet(sensitiveWords...)
+	sensitiveMatcher = matcher.NewMatcher(sensitiveWords)
 }
 
 func IsStringValid(str string) bool {
-	if sensitiveWordsSet.Contains(str) {
+	if !utf8.ValidString(str) || sensitiveMatcher.Contains(str) {
 		return false
-	}
-	for word := range sensitiveWordsSet {
-		if word != "" && strings.Contains(str, word) {
-			return false
-		}
 	}
 	for _, char := range str {
 		if unicode.IsPunct(char) {

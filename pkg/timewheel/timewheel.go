@@ -1,169 +1,227 @@
+// Adapted from github.com/NumberMan1/orbit (81cbe7b).
+// Copyright (c) 2025 NumberMan1. See third_party/ORBIT_LICENSE.
+
 package timewheel
 
 import (
 	"container/list"
-	"fmt"
+	"errors"
+	"log/slog"
+	"reflect"
+	"runtime/debug"
 	"time"
 )
 
-// Task 是时间轮中的一个定时任务。
-type Task struct {
-	Delay    time.Duration // 任务的延迟时间
-	Key      any           // 任务的唯一标识符，用于取消任务
-	Data     any           // 任务携带的自定义数据
-	Callback func(any)     // 任务到期时执行的回调函数
-	circle   int           // 任务需要在时间轮上转动的圈数
+var (
+	ErrInvalidKey     = errors.New("timewheel: key must be comparable and reflexive")
+	ErrTimerExists    = errors.New("timewheel: timer key already exists")
+	ErrClockBackwards = errors.New("timewheel: clock moved backwards")
+)
+
+type WheelOptions struct {
+	Tick   time.Duration
+	Slots  int
+	Logger *slog.Logger // nil captures slog.Default()
 }
 
-// TimeWheel 是一个时间轮调度器。
-// 它将时间划分为多个槽（slot），每个槽代表一个时间间隔。
-// 定时任务根据其到期时间被放入相应的槽中。
-// 调度器通过一个指针按固定间隔扫过所有槽，来触发到期的任务。
-// 此实现是线程安全的。所有操作通过内部 channel 在单一 goroutine 中完成。
-type TimeWheel struct {
-	interval   time.Duration    // 每个槽代表的时间间隔
-	ticker     *time.Ticker     // Go原生的定时器，用于驱动时间轮指针移动
-	slots      []*list.List     // 时间轮的槽位，每个槽是一个双向链表，存储任务
-	timer      map[any]int      // 任务Key到其所在槽索引的映射，用于快速删除任务
-	currentPos int              // 指针当前所在的槽位索引
-	slotNum    int              // 槽位的总数
-	taskChan   chan *Task       // 用于添加任务的channel
-	removeChan chan any         // 用于移除任务的channel
-	stopChan   chan struct{}    // 用于停止时间轮的channel
-	OnExpired  func(task *Task) // 任务到期时的统一回调
+type wheelTask[K comparable] struct {
+	key      K
+	at       time.Time
+	interval time.Duration
+	fn       func(time.Time)
+	rounds   uint64
+	slot     int
+	element  *list.Element
 }
 
-// NewTimeWheel 创建一个新的时间轮。
-// interval: 时间轮的滴答间隔，即指针多久移动一格。
-// slotNum: 时间轮的槽位数量。
-// onExpiredCallback: 一个统一的回调函数，当任何任务到期时都会被调用。
-func NewTimeWheel(interval time.Duration, slotNum int, onExpiredCallback func(task *Task)) (*TimeWheel, error) {
-	if interval <= 0 || slotNum <= 0 {
-		return nil, fmt.Errorf("interval and slotNum must be positive")
+// TimeWheel is a caller-driven, keyed timing wheel with no goroutines or runtime
+// timers. All methods must run on one owner (for example an Orbit service.Queue).
+// Callbacks may Schedule, Cancel or Reset, but must not recursively Advance.
+// Tick precision rounds deadlines UP; callbacks never fire before their deadline.
+type TimeWheel[K comparable] struct {
+	start, observed time.Time
+	tick            time.Duration
+	current         uint64
+	slots           []list.List
+	tasks           map[K]*wheelTask[K]
+	logger          *slog.Logger
+	advancing       bool
+}
+
+func NewTimeWheel[K comparable](start time.Time, options WheelOptions) (*TimeWheel[K], error) {
+	if options.Tick <= 0 || options.Slots < 2 {
+		return nil, errors.New("timewheel: positive tick and at least two slots required")
 	}
-	tw := &TimeWheel{
-		interval:   interval,
-		slots:      make([]*list.List, slotNum),
-		timer:      make(map[any]int),
-		currentPos: 0,
-		slotNum:    slotNum,
-		taskChan:   make(chan *Task),
-		removeChan: make(chan any),
-		stopChan:   make(chan struct{}),
-		OnExpired:  onExpiredCallback,
+	if options.Logger == nil {
+		options.Logger = slog.Default()
 	}
+	return &TimeWheel[K]{start: start, observed: start, tick: options.Tick, slots: make([]list.List, options.Slots), tasks: make(map[K]*wheelTask[K]), logger: options.Logger}, nil
+}
 
-	// 初始化每个槽位
-	for i := 0; i < slotNum; i++ {
-		tw.slots[i] = list.New()
+// Schedule adds a unique key. interval=0 fires once; interval>0 repeats with a
+// fixed delay from the time passed to Advance, coalescing missed repetitions.
+// Use time.Now().Add(delay) in real time or your simulation clock in simulations.
+func (w *TimeWheel[K]) Schedule(key K, at time.Time, interval time.Duration, fn func(time.Time)) error {
+	if !validKey(key) {
+		return ErrInvalidKey
 	}
-	return tw, nil
+	if fn == nil || interval < 0 {
+		return errors.New("timewheel: invalid timer callback or interval")
+	}
+	if _, ok := w.tasks[key]; ok {
+		return ErrTimerExists
+	}
+	if err := w.checkDeadline(at); err != nil {
+		return err
+	}
+	task := &wheelTask[K]{key: key, at: at, interval: interval, fn: fn}
+	w.tasks[key] = task
+	w.place(task)
+	return nil
 }
 
-// Start 启动时间轮。
-func (tw *TimeWheel) Start() {
-	tw.ticker = time.NewTicker(tw.interval)
-	go tw.run()
+func (w *TimeWheel[K]) checkDeadline(at time.Time) error {
+	// Keep tick rounding and duration multiplication within time.Duration.
+	if at.After(w.start.Add(time.Duration(1<<63-1) - w.tick)) {
+		return errors.New("timewheel: timer exceeds duration horizon")
+	}
+	return nil
 }
 
-// Stop 停止时间轮。
-func (tw *TimeWheel) Stop() {
-	close(tw.stopChan)
-}
-
-// AddTask 添加一个定时任务。
-// 任务的Key必须是可比较的类型，并且是唯一的。这是一个线程安全的操作。
-func (tw *TimeWheel) AddTask(task *Task) {
-	tw.taskChan <- task
-}
-
-// RemoveTask 根据任务的Key来移除一个还未执行的定时任务。这是一个线程安全的操作。
-func (tw *TimeWheel) RemoveTask(key any) {
-	tw.removeChan <- key
-}
-
-// run 是时间轮的主循环 Goroutine。
-func (tw *TimeWheel) run() {
-	defer tw.ticker.Stop()
-	for {
-		select {
-		case <-tw.ticker.C:
-			tw.tick()
-		case task := <-tw.taskChan:
-			tw.addTask(task)
-		case key := <-tw.removeChan:
-			tw.removeTask(key)
-		case <-tw.stopChan:
-			return
+func (w *TimeWheel[K]) place(task *wheelTask[K]) {
+	var due uint64
+	if elapsed := task.at.Sub(w.start); elapsed > 0 {
+		due = uint64(elapsed / w.tick)
+		if elapsed%w.tick != 0 {
+			due++
 		}
 	}
-}
-
-// tick 是每次指针移动时执行的核心逻辑。
-func (tw *TimeWheel) tick() {
-	// 获取当前槽位的任务列表
-	l := tw.slots[tw.currentPos]
-	// 遍历列表
-	for e := l.Front(); e != nil; {
-		task := e.Value.(*Task)
-		if task.circle > 0 {
-			// 如果任务还需要转几圈，则圈数减一，继续等待
-			task.circle--
-			e = e.Next()
-			continue
-		}
-
-		// 任务到期，执行回调。使用 goroutine 以防止回调阻塞时间轮。
-		if tw.OnExpired != nil {
-			go tw.OnExpired(task)
-		} else if task.Callback != nil {
-			go task.Callback(task.Data)
-		}
-
-		// 从链表和映射中移除该任务
-		next := e.Next()
-		l.Remove(e)
-		if task.Key != nil {
-			delete(tw.timer, task.Key)
-		}
-		e = next
+	if due <= w.current {
+		due = w.current + 1
 	}
-
-	// 移动指针到下一个槽位
-	tw.currentPos = (tw.currentPos + 1) % tw.slotNum
+	task.rounds = (due - w.current - 1) / uint64(len(w.slots))
+	task.slot = int(due % uint64(len(w.slots)))
+	task.element = w.slots[task.slot].PushBack(task)
 }
 
-// addTask 将任务添加到正确的槽位。
-func (tw *TimeWheel) addTask(task *Task) {
-	if task == nil || task.Key == nil {
-		return
+func (w *TimeWheel[K]) Len() int { return len(w.tasks) }
+
+// Cancel returns true if this key was still pending. It cannot undo a callback
+// that has begun; a repeating timer can cancel itself from its callback.
+func (w *TimeWheel[K]) Cancel(key K) bool {
+	if !validKey(key) {
+		return false
 	}
-	// 计算任务应该在多少个滴答之后执行
-	delayTicks := int(task.Delay / tw.interval)
-	// 计算任务需要转动的圈数
-	task.circle = delayTicks / tw.slotNum
-	// 计算任务最终落脚的槽位索引
-	pos := (tw.currentPos + delayTicks) % tw.slotNum
-
-	// 将任务添加到槽位的链表中
-	tw.slots[pos].PushBack(task)
-	// 记录任务Key和槽位索引的映射关系
-	tw.timer[task.Key] = pos
-}
-
-// removeTask 移除任务。
-func (tw *TimeWheel) removeTask(key any) {
-	pos, ok := tw.timer[key]
+	task, ok := w.tasks[key]
 	if !ok {
-		return
+		return false
 	}
-	l := tw.slots[pos]
-	for e := l.Front(); e != nil; e = e.Next() {
-		task := e.Value.(*Task)
-		if task.Key == key {
-			delete(tw.timer, key)
-			l.Remove(e)
-			break
+	if task.element != nil {
+		w.slots[task.slot].Remove(task.element)
+	}
+	delete(w.tasks, key)
+	return true
+}
+
+// Reset preserves the callback and repetition interval. A reset also invalidates
+// an expired callback waiting in the current batch. Missing keys return false.
+func (w *TimeWheel[K]) Reset(key K, at time.Time) (bool, error) {
+	if !validKey(key) {
+		return false, ErrInvalidKey
+	}
+	task, ok := w.tasks[key]
+	if !ok {
+		return false, nil
+	}
+	if err := w.checkDeadline(at); err != nil {
+		return false, err
+	}
+	w.Cancel(key)
+	return true, w.Schedule(key, at, task.interval, task.fn)
+}
+
+// Clear cancels pending callbacks, including the remainder of an expiry batch.
+func (w *TimeWheel[K]) Clear() {
+	clear(w.tasks)
+	for i := range w.slots {
+		w.slots[i].Init()
+	}
+}
+
+// Advance processes at most maxTicks tick buckets, returning whether it caught
+// up to now. Call again with the same/later now after a long stall. Work within a
+// bucket is proportional to its population; maxTicks is NOT a callback budget.
+// Equal-deadline tasks follow insertion order. Panics are logged and isolated.
+func (w *TimeWheel[K]) Advance(now time.Time, maxTicks int) (bool, error) {
+	if w.advancing {
+		return false, errors.New("timewheel: recursive wheel advance")
+	}
+	if maxTicks <= 0 {
+		return false, errors.New("timewheel: positive tick budget required")
+	}
+	if now.Before(w.observed) {
+		return false, ErrClockBackwards
+	}
+	if err := w.checkDeadline(now); err != nil {
+		return false, err
+	}
+	w.observed = now
+	w.advancing = true
+	defer func() { w.advancing = false }()
+	target := uint64(now.Sub(w.start) / w.tick)
+	if len(w.tasks) == 0 {
+		w.current = target
+		return true, nil
+	}
+	steps := min(target-w.current, uint64(maxTicks))
+	for range steps {
+		w.current++
+		bucket := &w.slots[w.current%uint64(len(w.slots))]
+		var ready []*wheelTask[K]
+		for e := bucket.Front(); e != nil; {
+			next := e.Next()
+			task := e.Value.(*wheelTask[K])
+			if task.rounds > 0 {
+				task.rounds--
+			} else {
+				bucket.Remove(e)
+				task.element = nil
+				ready = append(ready, task)
+			}
+			e = next
+		}
+		for _, task := range ready {
+			if w.tasks[task.key] != task {
+				continue
+			}
+			delete(w.tasks, task.key)
+			if task.interval > 0 {
+				task.at = now.Add(task.interval)
+				if err := w.checkDeadline(task.at); err == nil {
+					w.tasks[task.key] = task
+					w.place(task)
+				} else {
+					w.logger.Error("timer repeat stopped", "error", err)
+				}
+			}
+			w.call(task, now)
 		}
 	}
+	return w.current == target, nil
+}
+
+func (w *TimeWheel[K]) call(task *wheelTask[K], now time.Time) {
+	defer func() {
+		if p := recover(); p != nil {
+			w.logger.Error("timer callback panic", "panic", p, "stack", string(debug.Stack()))
+		}
+	}()
+	task.fn(now)
+}
+
+// Interface keys can hold non-comparable values despite K's comparable constraint.
+// NaN-containing keys are rejected because they cannot be looked up or canceled.
+func validKey[K comparable](key K) bool {
+	value := reflect.ValueOf(key)
+	return (!value.IsValid() || value.Comparable()) && key == key
 }

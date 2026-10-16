@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"reflect"
 	"strconv"
 	"strings"
 	"unicode"
@@ -13,13 +14,17 @@ func ParseIntTypString[T ~int32 | ~int64](str string) T {
 }
 
 func ParseIntStringWithReceiver[T ~int | ~int8 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint32 | ~uint64](str string, val *T) {
-	inf, _ := strconv.ParseInt(str, 10, 64)
-	*val = T(inf)
+	*val = ParseIntString[T](str)
 }
 
 func ParseIntString[T ~int | ~int8 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint32 | ~uint64](str string) T {
-	inf, _ := strconv.ParseInt(str, 10, 64)
-	return T(inf)
+	var zero T
+	if reflect.TypeOf(zero).Kind() >= reflect.Uint {
+		value, _ := strconv.ParseUint(str, 10, 64)
+		return T(value)
+	}
+	value, _ := strconv.ParseInt(str, 10, 64)
+	return T(value)
 }
 
 func ParseIntStrings[T ~int | ~int8 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint32 | ~uint64](strVals []string) []T {
@@ -43,7 +48,10 @@ func GetNameStringLength(nameStr string) int {
 }
 
 func FormatIntString[T ~int | ~int8 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint32 | ~uint64](intVal T) string {
-	return strconv.FormatInt(int64(intVal), 10)
+	if intVal < 0 {
+		return strconv.FormatInt(int64(intVal), 10)
+	}
+	return strconv.FormatUint(uint64(intVal), 10)
 }
 
 func FormatIntTypString[T ~int32 | ~int64](src T) string {

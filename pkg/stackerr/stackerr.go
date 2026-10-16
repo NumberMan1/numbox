@@ -7,21 +7,66 @@ import (
 	pkgerrors "github.com/pkg/errors"
 )
 
-// Callers returns a pkgerrors.StackTrace with the given skip depth.
-func Callers(skip int) pkgerrors.StackTrace {
+// Trace is the stack representation exposed by this package.
+type Trace = pkgerrors.StackTrace
+
+// Capture records the current call stack after skipping skipFrames helper
+// frames. A non-positive skipFrames value keeps the complete captured stack.
+func Capture(skipFrames int) Trace {
 	err := pkgerrors.New("")
-	var tracer interface {
-		StackTrace() pkgerrors.StackTrace
-	}
+	var tracer Tracer
 	if errors.As(err, &tracer) {
-		st := tracer.StackTrace()
-		if len(st) > skip {
-			return st[skip:]
-		}
-		return st
+		stack := tracer.StackTrace()
+		skipFrames = max(0, min(skipFrames, len(stack)))
+		return stack[skipFrames:]
 	}
 	return nil
 }
+
+// Tracer is implemented by errors that expose a stack through StackTrace.
+// The method name intentionally matches github.com/pkg/errors.
+type Tracer interface {
+	StackTrace() Trace
+}
+
+// TraceFrom returns the first Trace exposed by err's standard error chain.
+// It returns false when err is nil or no error in the chain implements Tracer.
+func TraceFrom(err error) (Trace, bool) {
+	if err == nil {
+		return nil, false
+	}
+	var tracer Tracer
+	if !errors.As(err, &tracer) {
+		return nil, false
+	}
+	return tracer.StackTrace(), true
+}
+
+// FromPanic converts a recovered value to an error and adds a stack when
+// needed. When value is already an error, its identity and error chain are
+// preserved.
+func FromPanic(value any) error {
+	panicErr, ok := value.(error)
+	if !ok {
+		panicErr = errors.New(fmt.Sprint(value))
+	}
+	return WithStack(panicErr)
+}
+
+// WithStack returns err with a stack. It preserves nil and returns an error
+// that already implements Tracer unchanged, so a chain is not stacked twice.
+func WithStack(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := TraceFrom(err); ok {
+		return err
+	}
+	return pkgerrors.WithStack(err)
+}
+
+// Callers is the compatibility name for Capture.
+func Callers(skip int) Trace { return Capture(skip + 1) }
 
 type StackError interface {
 	SetInnerError(innerErr error)
@@ -66,10 +111,13 @@ func (e *stackError) SetInnerError(innerErr error) {
 
 func (e *stackError) InnerError() error {
 	if e.innerErr == nil {
-		e.innerErr = errors.New(e.msg)
+		return errors.New(e.msg)
 	}
 	return e.innerErr
 }
+
+// Unwrap exposes the original cause to errors.Is and errors.As.
+func (e *stackError) Unwrap() error { return e.innerErr }
 
 func (e *stackError) StackTrace() pkgerrors.StackTrace {
 	return e.stack

@@ -121,8 +121,9 @@ type Item interface {
 }
 
 type Pool struct {
-	randSeed    int64
-	rand        *rand.Rand
+	randSeed int64
+	rand     *rand.Rand
+	// Items is exposed for compatibility. Do not mutate it or item weights after Add.
 	Items       []Item
 	totalWeight int
 	cum         []int // 内部维护的累加权重，对外部完全透明
@@ -133,12 +134,30 @@ func (p *Pool) Length() int {
 }
 
 func (p *Pool) Add(item Item) {
+	if item == nil {
+		panic("weight: nil item")
+	}
+	weight := item.Weight()
+	if weight < 0 || weight > int(^uint(0)>>1)-p.totalWeight {
+		panic("weight: negative or overflowing weight")
+	}
+	sum := weight
+	if len(p.cum) > 0 {
+		sum += p.cum[len(p.cum)-1]
+	}
 	p.Items = append(p.Items, item)
-	p.totalWeight += item.Weight()
-	p.cum = append(p.cum, p.totalWeight)
+	p.totalWeight += weight
+	p.cum = append(p.cum, sum)
 }
 
 func (p *Pool) SetTotalWeight(totalWeight int) {
+	sum := 0
+	if len(p.cum) > 0 {
+		sum = p.cum[len(p.cum)-1]
+	}
+	if totalWeight < sum {
+		panic("weight: total weight is less than item weights")
+	}
 	p.totalWeight = totalWeight
 }
 
@@ -161,13 +180,12 @@ func (p *Pool) Copy() Pool {
 
 // PickManyRandom picks up to pickCount items, skipping misses if r exceeds sum of weights.
 func (p *Pool) PickManyRandom(pickCount int) []Item {
-	if len(p.Items) <= pickCount {
-		Shuffle(p.randSeed, p.Items)
-		return p.Items
+	if pickCount <= 0 {
+		return nil
 	}
 	newPool := p.Copy()
-	res := make([]Item, 0, pickCount)
-	for i := 0; i < pickCount; i++ {
+	res := make([]Item, 0, min(pickCount, len(p.Items)))
+	for i := 0; i < pickCount && newPool.Length() > 0; i++ {
 		item, ok := newPool.PickRandom()
 		if ok {
 			res = append(res, item)
@@ -180,14 +198,8 @@ func (p *Pool) PickManyRandom(pickCount int) []Item {
 // PickRandom returns a random item based on p.totalWeight; if r > sum of item weights, returns nil,false.
 func (p *Pool) PickRandom() (Item, bool) {
 	n := len(p.Items)
-	if n == 0 {
+	if n == 0 || p.totalWeight <= 0 {
 		return nil, false
-	}
-	if n == 1 && p.Items[0].Weight() >= p.totalWeight {
-		item := p.Items[0]
-		p.Items = nil
-		p.totalWeight = 0
-		return item, true
 	}
 	r := p.rand.Intn(p.totalWeight) + 1
 	if len(p.cum) > 0 && r > p.cum[len(p.cum)-1] {
@@ -198,24 +210,27 @@ func (p *Pool) PickRandom() (Item, bool) {
 	if idx < 0 || idx >= n {
 		return nil, false
 	}
-	// pick and remove
+	// Remove using the indexed weight, keeping zero weights and any miss range.
 	item := p.Items[idx]
-	p.Items = append(p.Items[:idx], p.Items[idx+1:]...)
-	p.totalWeight -= item.Weight()
-
-	p.cum = p.cum[:len(p.Items)]
-	sum := 0
-	for i, it := range p.Items {
-		sum += it.Weight()
-		p.cum[i] = sum
+	weight := p.cum[idx]
+	if idx > 0 {
+		weight -= p.cum[idx-1]
 	}
+	copy(p.Items[idx:], p.Items[idx+1:])
+	p.Items[n-1] = nil
+	p.Items = p.Items[:n-1]
+	p.totalWeight -= weight
+	for i := idx; i < n-1; i++ {
+		p.cum[i] = p.cum[i+1] - weight
+	}
+	p.cum = p.cum[:n-1]
 	return item, true
 }
 
 // PickRandomAndPutBack 随机获取一个物品但不从池子中移除 (放回抽样)
 func (p *Pool) PickRandomAndPutBack() (Item, bool) {
 	n := len(p.Items)
-	if n == 0 {
+	if n == 0 || p.totalWeight <= 0 {
 		return nil, false
 	}
 
@@ -235,7 +250,7 @@ func (p *Pool) PickRandomAndPutBack() (Item, bool) {
 // PickRandomManyAndPutBack 随机获取多个物品但不移除 (多次放回抽样)
 func (p *Pool) PickRandomManyAndPutBack(pickCount int) []Item {
 	n := len(p.Items)
-	if n == 0 || pickCount <= 0 {
+	if n == 0 || pickCount <= 0 || p.totalWeight <= 0 {
 		return nil
 	}
 

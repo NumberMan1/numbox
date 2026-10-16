@@ -1,16 +1,9 @@
 package time
 
 import (
+	"sync/atomic"
 	"time"
 )
-
-func init() {
-	var err error
-	time.Local, err = time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		time.Local = time.FixedZone("CST", 8*3600)
-	}
-}
 
 const (
 	Nanosecond  = time.Nanosecond
@@ -31,21 +24,21 @@ func NewTimestamp(t time.Time) Timestamp {
 }
 
 func NewTimestampNow() Timestamp {
-	return Timestamp(time.Now().UnixMilli())
+	return Timestamp(Now().UnixMilli())
 }
 
 func GetTodayStartEnd(nowArg ...Timestamp) (Timestamp, Timestamp) {
-	var now = NewTimestamp(time.Now())
+	var now = NewTimestamp(Now())
 	if len(nowArg) > 0 {
 		now = nowArg[0]
 	}
 	todayStart := GetTodayStart(now)
-	todayEnd := todayStart.AddDuration(24 * time.Hour)
+	todayEnd := NewTimestamp(todayStart.Time().AddDate(0, 0, 1))
 	return todayStart, todayEnd
 }
 
 func GetTodayStart(nowArg ...Timestamp) Timestamp {
-	var now = time.Now()
+	var now = Now()
 	if len(nowArg) > 0 {
 		now = nowArg[0].Time()
 	}
@@ -54,26 +47,26 @@ func GetTodayStart(nowArg ...Timestamp) Timestamp {
 }
 
 func GetTodayEnd(nowArg ...Timestamp) Timestamp {
-	var now = time.Now()
+	var now = Now()
 	if len(nowArg) > 0 {
 		now = nowArg[0].Time()
 	}
-	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Add(24 * time.Hour)
+	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, 1)
 	return NewTimestamp(endOfDay)
 }
 
 func GetWeekStartEnd(nowArg ...Timestamp) (Timestamp, Timestamp) {
-	var now = NewTimestamp(time.Now())
+	var now = NewTimestamp(Now())
 	if len(nowArg) > 0 {
 		now = nowArg[0]
 	}
 	weekStart := GetWeekStart(now)
-	weekEnd := weekStart.AddDuration(7 * 24 * time.Hour)
+	weekEnd := NewTimestamp(weekStart.Time().AddDate(0, 0, 7))
 	return weekStart, weekEnd
 }
 
 func GetWeekStart(nowArg ...Timestamp) Timestamp {
-	var now = time.Now()
+	var now = Now()
 	if len(nowArg) > 0 {
 		now = nowArg[0].Time()
 	}
@@ -87,7 +80,7 @@ func GetWeekStart(nowArg ...Timestamp) Timestamp {
 }
 
 func GetWeekEnd(nowArg ...Timestamp) Timestamp {
-	var now = time.Now()
+	var now = Now()
 	if len(nowArg) > 0 {
 		now = nowArg[0].Time()
 	}
@@ -96,7 +89,7 @@ func GetWeekEnd(nowArg ...Timestamp) Timestamp {
 		weekday = 7
 	}
 	monday := now.AddDate(0, 0, -weekday+1)
-	weekEnd := time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, now.Location()).Add(7 * 24 * time.Hour)
+	weekEnd := time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, 7)
 	return NewTimestamp(weekEnd)
 }
 
@@ -160,8 +153,8 @@ func ParseDateString(layout string, dateStr string) (Timestamp, error) {
 }
 
 func GetZoneOffset() float64 {
-	_, zoneOffset := time.Now().Zone()
-	return float64(zoneOffset / 3600)
+	_, zoneOffset := Now().Zone()
+	return float64(zoneOffset) / 3600
 }
 
 func FormatTimeToDateString(dateline Timestamp) string {
@@ -172,18 +165,18 @@ func FormatTimeToDateString(dateline Timestamp) string {
 }
 
 func Since(timestamp Timestamp) Duration {
-	return time.Since(timestamp.Time())
+	return Now().Sub(timestamp.Time())
 }
 
 func SinceDays(timestamp Timestamp) int {
-	return int(time.Since(timestamp.Time()).Hours()/24) + 1
+	return int(Now().Sub(timestamp.Time()).Hours()/24) + 1
 }
 
 // DurationToNextInterval returns the time.Duration until the next multiple of the given interval.
-// If t is zero value, uses current time. Interval must be >0.
+// Invalid timestamps or non-positive intervals return zero.
 func DurationToNextInterval(timestamp Timestamp, interval time.Duration) time.Duration {
 	var t = timestamp.Time()
-	if interval <= 0 || t.IsZero() {
+	if interval <= 0 || !timestamp.IsValid() {
 		return 0
 	}
 	// Truncate to the interval and add one interval to get next boundary
@@ -197,5 +190,24 @@ func IsToday(checkTimestamp Timestamp) bool {
 	}
 	now := NewTimestampNow()
 	todayStart, todayEnd := GetTodayStartEnd(now)
-	return checkTimestamp >= todayStart && checkTimestamp <= todayEnd
+	return checkTimestamp >= todayStart && checkTimestamp < todayEnd
 }
+
+var offsetMillis atomic.Int64
+
+// Now returns the adjustable calendar clock. Use standard time.Now for timeouts,
+// elapsed-time measurements, logging and time wheels.
+func Now() time.Time { return time.Now().Add(time.Duration(offsetMillis.Load()) * time.Millisecond) }
+
+// SetOffsetMillis sets the calendar offset. Values outside time.Duration panic.
+func SetOffsetMillis(ms int64) {
+	const limit = int64((1<<63 - 1) / time.Millisecond)
+	if ms < -limit || ms > limit {
+		panic("time: clock offset exceeds duration range")
+	}
+	offsetMillis.Store(ms)
+}
+func OffsetMillis() int64 { return offsetMillis.Load() }
+
+// IsValid reports whether the timestamp is assigned; zero and negative values are invalid.
+func (t Timestamp) IsValid() bool { return t > 0 }
