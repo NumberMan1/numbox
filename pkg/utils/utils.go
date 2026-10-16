@@ -86,7 +86,7 @@ func FormatBoolToInt[T int | int8 | int32 | int64 | uint | uint8 | uint32 | uint
 	return T(0)
 }
 
-// durationMap 定义中文时间单位对应的毫秒数
+// durationMap 定义中文时间单位对应的时长。
 var durationMap = map[string]time.Duration{
 	"毫秒": time.Millisecond,
 	"秒钟": time.Second,

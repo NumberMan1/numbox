@@ -4,15 +4,18 @@ import (
 	jsoniter "github.com/json-iterator/go"
 )
 
-func ToJsonString(v interface{}) string {
+// ToJSONString marshals v as JSON, returning an empty string for nil.
+// A marshal error panics, matching the existing JSON helpers.
+func ToJSONString(v interface{}) string {
 	if v == nil {
 		return ""
 	}
-	jsonBytes := ToJsonBytes(v)
+	jsonBytes := ToJSONBytes(v)
 	return string(jsonBytes)
 }
 
-func ToJsonBytes(v interface{}) []byte {
+// ToJSONBytes marshals v as JSON and panics on a marshal error.
+func ToJSONBytes(v interface{}) []byte {
 	jsonBytes, err := jsoniter.ConfigFastest.Marshal(v)
 	if err != nil {
 		panic(err)

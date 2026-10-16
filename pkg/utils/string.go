@@ -9,7 +9,8 @@ import (
 	"github.com/NumberMan1/numbox/pkg/percent"
 )
 
-func ParseIntTypString[T ~int32 | ~int64](str string) T {
+// ParseIntTypeString parses a signed integer, including named int32/int64 types.
+func ParseIntTypeString[T ~int32 | ~int64](str string) T {
 	return T(ParseIntString[int64](str))
 }
 
@@ -54,7 +55,8 @@ func FormatIntString[T ~int | ~int8 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint32
 	return strconv.FormatUint(uint64(intVal), 10)
 }
 
-func FormatIntTypString[T ~int32 | ~int64](src T) string {
+// FormatIntTypeString formats a signed integer, including named int32/int64 types.
+func FormatIntTypeString[T ~int32 | ~int64](src T) string {
 	return FormatIntString(int64(src))
 }
 
@@ -86,11 +88,11 @@ func FormatIntSliceString[T ~int | ~int8 | ~int32 | ~int64 | ~uint | ~uint8 | ~u
 	return strings.Join(FormatIntSliceToStringSlice(srcArr), ",")
 }
 
-type stringTyp interface {
+type stringType interface {
 	ToString() string
 }
 
-func FormatAnySliceToString[T stringTyp](srcArr []T) string {
+func FormatAnySliceToString[T stringType](srcArr []T) string {
 	var res = make([]string, 0, len(srcArr))
 	for _, str := range srcArr {
 		res = append(res, str.ToString())
