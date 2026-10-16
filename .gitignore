@@ -1,1 +1,4 @@
 .idea
+
+# Keep dependency checksums even when a global ignore rule excludes them.
+!/go.sum
