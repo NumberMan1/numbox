@@ -53,18 +53,22 @@ func (l *locker) Lock(opt ...LockOption) (token Token) {
 // 解锁
 func (l *locker) Unlock(token Token, opt ...UnlockOption) bool {
 	l.mutex.Lock()
-	defer l.mutex.Unlock()
 
 	if l.token != token {
+		l.mutex.Unlock()
 		return false
 	}
 	l.write = 0
+	l.mutex.Unlock()
+	// Invoke user callbacks after releasing the mutex so they can query Acquired.
 	conf := newUnlockConfig(opt...)
 	conf.cb.invoke()
 	return true
 }
 
-// 是否持有锁
+// Acquired 并发安全地查询 token 是否仍持有未过期的锁。
 func (l *locker) Acquired(tk Token) bool {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
 	return l.write == 1 && l.token == tk && time.Now().Before(l.expireAt)
 }

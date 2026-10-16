@@ -26,7 +26,7 @@ go vet ./...
 git diff --check
 ```
 
-首次补齐校验文件、添加或删除依赖时运行 `go mod tidy`，一并提交 `go.mod` 与 `go.sum`；
+添加或删除依赖时运行 `go mod tidy`，一并提交 `go.mod` 与 `go.sum`；
 普通改动不要顺带升级无关依赖。没有 C 编译器时可以先检查所修改的纯 Go 包，
 但这不能代替 Ubuntu 上的完整 CI。
 

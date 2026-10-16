@@ -24,8 +24,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          # The historical repository has no go.sum yet.
-          cache: false
+          cache: true
       - name: Download and verify dependencies
         run: |
           go mod download all
