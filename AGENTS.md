@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-此文件为 Claude Code (claude.ai/code) 在此仓库中工作时提供指导。
+此文件为在本仓库中工作的 AI 编程助手提供通用指导，适用于整个仓库。
 
 ## 构建与测试
 
@@ -25,8 +25,7 @@ CGO_ENABLED=1 go build ./...
 
 这是一个 Go 工具库（模块 `github.com/NumberMan1/numbox`），提供可复用的数据结构和辅助函数。各包之间相互独立，没有统一的框架将它们耦合在一起，但存在以下内部依赖关系：
 
-- `pkg/collection` → `pkg/utils`（使用 `MapKeys`）
-- `pkg/sensitive-word` → `pkg/collection`（Set）、`pkg/utils`（JSON 反序列化）
+- `pkg/sensitive-word` → `pkg/matcher`（词表匹配）、`pkg/utils`（JSON 反序列化）
 - `pkg/encryp` → `pkg/env`（获取 JWT 默认密钥）
 
 ### 关键设计模式
@@ -41,7 +40,7 @@ CGO_ENABLED=1 go build ./...
 
 **权重池（`pkg/weight`）** 基于累计权重的二分查找实现加权随机选取（O(log N)）。`Item` 接口要求实现 `Weight() int` 方法。泛型便捷函数（`PickOneFromItems[T Item]`、`PickManyFromFairPool[T]` 等）封装了常见使用场景。`PickRandom()` 为不放回抽样——若需放回抽样，使用 `PickRandomAndPutBack()`。
 
-**时间轮（`pkg/timewheel`）** 是基于 channel 的定时任务调度器。所有操作（添加/删除/滴答推进）都通过单个 goroutine 的 `select` 循环串行化，无需互斥锁即可保证 goroutine 安全。到期任务在独立的 goroutine 中执行，以防止阻塞时间轮的推进。
+**时间轮（`pkg/timewheel`）** 采用 Orbit 的泛型主动推进实现。由同一个 owner 调用 `Schedule/Cancel/Reset/Clear/Advance`，不提供隐式锁、后台 goroutine 或旧版 `Start/Stop/Task` 接口。回调串行执行，截止时间向上取整，panic 默认通过 slog 记录。外部协程应投递到同一执行队列。详见 `pkg/timewheel/README.md`。
 
 **go-zset（`pkg/go-zset`）** 通过 cgo 封装了 C 实现的跳表——需要 `CGO_ENABLED=1`。如果需要纯 Go 方案，可使用 `pkg/skiplist`（基于 `big.Float` 键，适合任意精度的场景）。
 
@@ -49,7 +48,7 @@ CGO_ENABLED=1 go build ./...
 
 - `errors/` — 自定义 `CodeError` 类型，携带错误码（`Code int32`）以及可选的内部错误和堆栈信息。使用 `errors.ToError(code, data)` 将任意值转换为 CodeError。
 - `pkg/stackerr` — `StackError` 通过 `pkg/errors` 为错误包裹堆栈跟踪信息。`FormatStackError()` 是捕获 panic 并附加上下文的主要入口。
-- `pkg/utils` — `Must(err)` 和 `Asset(isOk, err)` 是遇错即 panic 的辅助函数。`WithRecover()` 用 recover 块包裹函数执行。
+- `pkg/utils` — `Must(err)` 和 `Assert(isOk, err)` 是遇错即 panic 的辅助函数。`WithRecover()` 用 recover 块包裹函数执行。
 
 ### Go 版本及依赖
 
