@@ -1,0 +1,4 @@
+# defaultutil
+
+GetParamWithDefaultValue、GetBoolParamWithDefault、GetStringParamWithDefault 返回第一个可选参数；
+未提供参数时返回默认值。不会把显式提供的零值、false 或空字符串替换成默认值。

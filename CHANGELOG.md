@@ -6,6 +6,41 @@
 
 ## 未发布
 
+## v0.4.1 - 2026-10-18
+
+### 文档与许可
+
+- 明确 `pkg/skiplist` 基于 `sean-public/fast-skiplist` 定制，补充上游地址、核对参考 commit、原始 MIT 许可全文及源码版权说明。
+- 记录已有的 `big.Float` 键、`math/rand/v2` / PCG 及范围和排名辅助方法等本地调整；同步第三方说明。本次不改变运行时行为或公开接口。
+
+## v0.4.0 - 2026-10-18
+
+### 不兼容变更
+
+- ZSet 明确拒绝 NaN 分数（Add 在修改前 panic），分数查询中的 NaN 边界返回空结果；负数保留数量按零处理。
+- 移除 Numeric；纯键值索引使用 comparable，数值运算使用 utils/typeutil.Number，最大值使用 cmp.Ordered。外部自行引用 Numeric 的代码需要调整约束。
+- 工具按职责拆至 `utils/convutil`、`sliceutil`、`maputil`、`jsonutil`、`randutil`、`timeutil`、`mathutil`、`strutil`、`ioutil`、`assertutil`、`defaultutil`、`typeutil`；env、percent、uuid 也位于 `utils` 子目录。根 `utils` 不提供 Go 包，权重配置解析归入 `pkg/weight`，详见 `docs/utils-migration.md`。
+- 移除 `pkg/sensitive-word` 和内嵌词表，避免导入时自动构建全局匹配树。`pkg/matcher` 保留，由应用显式传入词表和校验策略。
+
+### 修复
+
+- `pkg/go-zset` 改为纯 Go 的成员索引与带排名跨度跳表，移除 C 源码、CGo 和 finalizer，支持 Windows 及关闭 CGo 的构建。保留公开接口与 1-based 排名语义，同分按成员字节序排序。
+- ZSet 计数与逆序查询纳入锁保护，整个 Limit/RevLimit 裁剪在单次写锁内完成；限制范围查询的分配容量，分数更新复用节点。
+- 整数转换改用无反射的泛型符号判断，保留宽松解析兼容行为；切片转换预分配，整数切片格式化直接拼接字节，解析避免中间字符串切片。
+- 时间轮 key 校验改用无反射比较，继续拒绝不可比较的接口值及 NaN。
+
+### 新增
+
+- ZSet 排序模型、跳表跨度/反向链、边界、并发及模糊测试；CI 增加 Windows 和无 CGo 构建验证。
+- 新增 Integer、Number 约束，以及检查目标类型范围的 ParseInteger / ParseIntegerSlice；补充转换边界回归测试和旧实现性能对照基准。
+
+### 文档
+
+- 补充纯 Go ZSet 的用法、并发与边界约定，以及与旧 CGo 实现的性能和进程内存对比，详见 `docs/zset-performance.md`。
+- 更新 Windows 和无 CGo 构建说明，保留已移除 C 源码及词表的历史来源核对事项。
+
+## v0.3.0 - 2026-10-17
+
 ### 不兼容变更
 
 - 工具包从 `utils/*` 统一迁移到 `pkg/*`，并调整部分公开函数名称；升级时须更新导入路径并参照各包 README 迁移。

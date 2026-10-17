@@ -1,3 +1,8 @@
+// Copyright (c) 2017 sean
+// SPDX-License-Identifier: MIT
+// Derived from github.com/sean-public/fast-skiplist and modified for numbox.
+// See LICENSE and README.md in this directory for the license and local changes.
+
 package skiplist
 
 import (

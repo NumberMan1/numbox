@@ -1,243 +1,378 @@
+// Package zset provides a concurrent, ranked sorted set implemented in pure Go.
 package zset
 
-//#include "skiplist.h"
-import "C"
-
 import (
-	"runtime"
+	"fmt"
+	"math"
+	"math/rand/v2"
 	"sync"
 )
 
-// DEFAULT_TBL_LEN 默认表size
+// DEFAULT_TBL_LEN is the initial member-index capacity, retained for compatibility.
 const DEFAULT_TBL_LEN = 16
+const maxLevel = 32
 
-// ZSet 有序集合
+type link struct {
+	next *node
+	span int // number of level-zero members crossed, or remaining to the end
+}
+
+type node struct {
+	member   string
+	score    float64
+	previous *node
+	links    []link
+}
+
+// ZSet sorts by score ascending, then member bytes ascending. Methods are safe
+// concurrently; each query and trim observes one locked state. The zero value
+// works. Do not copy a ZSet after first use.
 type ZSet struct {
-	sl  *C.skiplist
-	tbl map[string]float64
-	mu  sync.RWMutex
+	mu            sync.RWMutex
+	head, tail    *node
+	level, length int
+	tbl           map[string]float64
 }
 
-// tocstring 将 Go 字符串转换为 C 字符串，并返回指针和长度
-func tocstring(s string) (*C.char, C.size_t) {
-	// 将 Go 字符串转换为 C 字符串
-	cstr := C.CString(s)
-	// 计算字符串长度
-	length := C.size_t(len(s))
-	return cstr, length
-}
-
-// newslobj 创建 skiplist 的对象节点
-func newslobj(s string) *C.slobj {
-	p, l := tocstring(s)
-	return C.slCreateObj(p, l)
-}
-
-// New 创建一个新的 ZSet 实例
+// New creates an empty set. No C compiler, finalizer or explicit Close is needed.
 func New() *ZSet {
-	z := &ZSet{sl: C.slCreate(), tbl: make(map[string]float64, DEFAULT_TBL_LEN)}
-	runtime.SetFinalizer(z, func(z *ZSet) {
-		C.slFree(z.sl)
-		z.tbl = nil
-	})
+	z := &ZSet{}
+	z.initLocked()
 	return z
 }
 
-// Add 向有序集合中添加成员，若成员已存在则更新分数
+func (z *ZSet) initLocked() {
+	if z.head == nil {
+		z.head = &node{links: make([]link, maxLevel)}
+		z.level = 1
+		z.tbl = make(map[string]float64, DEFAULT_TBL_LEN)
+	}
+}
+
+func nodeBefore(item *node, score float64, member string) bool {
+	return item.score < score || (item.score == score && item.member < member)
+}
+
+// predecessorsLocked records the path and zero-based rank at each level.
+func (z *ZSet) predecessorsLocked(score float64, member string, path *[maxLevel]*node, ranks *[maxLevel]int) {
+	current := z.head
+	rank := 0
+	for i := z.level - 1; i >= 0; i-- {
+		for next := current.links[i].next; next != nil && nodeBefore(next, score, member); next = current.links[i].next {
+			rank += current.links[i].span
+			current = next
+		}
+		path[i], ranks[i] = current, rank
+	}
+}
+
+func randomLevel() int {
+	level := 1
+	bits := rand.Uint64()
+	for level < maxLevel && bits&3 == 0 {
+		level++
+		bits >>= 2
+	}
+	return level
+}
+
+// Add inserts a member or updates its score. NaN panics before changing the set;
+// infinities are supported. Updating a member reuses its allocated node/tower.
 func (z *ZSet) Add(score float64, member string) {
+	if math.IsNaN(score) {
+		panic("zset: NaN score")
+	}
 	z.mu.Lock()
 	defer z.mu.Unlock()
-
+	z.initLocked()
+	var path [maxLevel]*node
+	var ranks [maxLevel]int
+	var item *node
 	if old, ok := z.tbl[member]; ok {
 		if old == score {
 			return
 		}
-		C.slDelete(z.sl, C.double(old), newslobj(member))
+		z.predecessorsLocked(old, member, &path, &ranks)
+		item = path[0].links[0].next
+		z.unlinkLocked(item, &path)
+		item.score = score
+	} else {
+		item = &node{member: member, score: score, links: make([]link, randomLevel())}
 	}
-	C.slInsert(z.sl, C.double(score), newslobj(member))
+	z.predecessorsLocked(score, member, &path, &ranks)
+	if height := len(item.links); height > z.level {
+		for i := z.level; i < height; i++ {
+			path[i], ranks[i] = z.head, 0
+			z.head.links[i].span = z.length
+		}
+		z.level = height
+	}
+	for i := range item.links {
+		distance := ranks[0] - ranks[i]
+		item.links[i] = link{next: path[i].links[i].next, span: path[i].links[i].span - distance}
+		path[i].links[i] = link{next: item, span: distance + 1}
+	}
+	for i := len(item.links); i < z.level; i++ {
+		path[i].links[i].span++
+	}
+	item.previous = path[0]
+	if item.previous == z.head {
+		item.previous = nil
+	}
+	if next := item.links[0].next; next != nil {
+		next.previous = item
+	} else {
+		z.tail = item
+	}
+	z.length++
 	z.tbl[member] = score
 }
 
-// Rem 从有序集合中移除指定成员
+// unlinkLocked removes a known node. The caller updates the member index.
+func (z *ZSet) unlinkLocked(item *node, path *[maxLevel]*node) {
+	for i := 0; i < z.level; i++ {
+		edge := &path[i].links[i]
+		if edge.next == item {
+			edge.span += item.links[i].span - 1
+			edge.next = item.links[i].next
+		} else {
+			edge.span--
+		}
+	}
+	if next := item.links[0].next; next != nil {
+		next.previous = item.previous
+	} else {
+		z.tail = item.previous
+	}
+	z.length--
+	for z.level > 1 && z.head.links[z.level-1].next == nil {
+		z.level--
+	}
+}
+
+// Rem removes a member, doing nothing if it is absent.
 func (z *ZSet) Rem(member string) {
 	z.mu.Lock()
 	defer z.mu.Unlock()
-
-	if score, ok := z.tbl[member]; ok {
-		C.slDelete(z.sl, C.double(score), newslobj(member))
-		delete(z.tbl, member)
+	score, ok := z.tbl[member]
+	if !ok {
+		return
 	}
+	var path [maxLevel]*node
+	var ranks [maxLevel]int
+	z.predecessorsLocked(score, member, &path, &ranks)
+	z.unlinkLocked(path[0].links[0].next, &path)
+	delete(z.tbl, member)
 }
 
-// Count 返回有序集合中的成员数量
+// Count returns the number of members.
 func (z *ZSet) Count() int {
-	return int(z.sl.length)
+	z.mu.RLock()
+	defer z.mu.RUnlock()
+	return z.length
 }
 
-// Score 获取指定成员的分数，若不存在返回 false
+// Score returns a member's score and whether it exists.
 func (z *ZSet) Score(member string) (float64, bool) {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
-
-	score, ex := z.tbl[member]
-	return score, ex
+	score, ok := z.tbl[member]
+	return score, ok
 }
 
-// Range 按排名范围返回成员列表（1-based），支持正序和逆序
-func (z *ZSet) Range(r1, r2 int) []string {
-	z.mu.RLock()
-	defer z.mu.RUnlock()
-
-	// 从1开始，不支持倒数查询
-	if r1 < 1 || r2 < 1 {
+func (z *ZSet) nodeByRankLocked(rank int) *node {
+	if rank < 1 || rank > z.length {
 		return nil
 	}
-
-	var reverse, rangelen int
-	if r1 <= r2 {
-		reverse = 0
-		rangelen = r2 - r1 + 1
-	} else {
-		reverse = 1
-		rangelen = r1 - r2 + 1
+	current := z.head
+	traversed := 0
+	for i := z.level - 1; i >= 0; i-- {
+		for current.links[i].next != nil && current.links[i].span <= rank-traversed {
+			traversed += current.links[i].span
+			current = current.links[i].next
+		}
+		if traversed == rank {
+			return current
+		}
 	}
-	node := C.slGetNodeByRank(z.sl, C.ulong(r1))
-	result := make([]string, 0, rangelen)
-	rr := C.int(reverse)
-	for n := 0; node != nil && n < rangelen; {
-		result = append(result, C.GoStringN(node.obj.ptr, C.int(node.obj.length)))
-		node = C.getNextNode(node, rr)
-		n++
+	return nil
+}
+
+func (z *ZSet) rangeLocked(first, last int) []string {
+	if first < 1 || last < 1 {
+		return nil
+	}
+	if first > z.length {
+		return []string{}
+	}
+	forward := first <= last
+	if forward {
+		last = min(last, z.length)
+	}
+	count := first - last + 1
+	if forward {
+		count = last - first + 1
+	}
+	result := make([]string, 0, count)
+	for item := z.nodeByRankLocked(first); item != nil && len(result) < count; {
+		result = append(result, item.member)
+		if forward {
+			item = item.links[0].next
+		} else {
+			item = item.previous
+		}
 	}
 	return result
 }
 
-// reverseRank 计算逆序排名
-func (z *ZSet) reverseRank(r int) int {
-	return z.Count() - r + 1
-}
-
-// RevRange 按逆序排名范围返回成员列表
-func (z *ZSet) RevRange(r1, r2 int) []string {
-	// 支持末尾超出查询 如：实际只有3条，查询2-6，实际返回2-3的数据
-	if r2 > z.Count() {
-		r2 = z.Count()
-	}
-	return z.Range(z.reverseRank(r1), z.reverseRank(r2))
-}
-
-// RangeByScore 按分数范围返回成员列表，支持正序和逆序
-func (z *ZSet) RangeByScore(s1, s2 float64) []string {
+// Range returns an inclusive, 1-based rank range. first>last walks backwards
+// from first. Nonpositive ranks return nil; an out-of-set first returns empty.
+// Endpoints beyond the end are bounded without allocating for the excess range.
+func (z *ZSet) Range(first, last int) []string {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
+	return z.rangeLocked(first, last)
+}
 
-	var reverse int
-	var node *C.skiplistNode
-	cs1, cs2 := C.double(s1), C.double(s2)
-	if s1 <= s2 {
-		reverse = 0
-		node = C.slFirstInRange(z.sl, cs1, cs2)
-	} else {
-		reverse = 1
-		node = C.slLastInRange(z.sl, cs2, cs1)
+// RevRange uses 1-based ranks counted from the largest member. An end beyond
+// Count is clamped. Reversing the endpoints reverses traversal direction.
+func (z *ZSet) RevRange(first, last int) []string {
+	z.mu.RLock()
+	defer z.mu.RUnlock()
+	if first < 1 || last < 1 || first > z.length {
+		return nil
 	}
+	last = min(last, z.length)
+	return z.rangeLocked(z.length-first+1, z.length-last+1)
+}
 
+// RangeByScore returns the inclusive score range, descending when first>last.
+// NaN bounds return an empty slice. Equal scores are ordered by member bytes.
+func (z *ZSet) RangeByScore(first, last float64) []string {
+	z.mu.RLock()
+	defer z.mu.RUnlock()
 	result := make([]string, 0)
-	rr := C.int(reverse)
-	for node != nil {
-		if reverse == 1 {
-			if node.score < cs2 {
-				break
-			}
-		} else {
-			if node.score > cs2 {
-				break
+	if z.length == 0 || math.IsNaN(first) || math.IsNaN(last) {
+		return result
+	}
+	current := z.head
+	if first <= last {
+		for i := z.level - 1; i >= 0; i-- {
+			for next := current.links[i].next; next != nil && next.score < first; next = current.links[i].next {
+				current = next
 			}
 		}
-		result = append(result, C.GoStringN(node.obj.ptr, C.int(node.obj.length)))
-		node = C.getNextNode(node, rr)
+		for current = current.links[0].next; current != nil && current.score <= last; current = current.links[0].next {
+			result = append(result, current.member)
+		}
+	} else {
+		for i := z.level - 1; i >= 0; i-- {
+			for next := current.links[i].next; next != nil && next.score <= first; next = current.links[i].next {
+				current = next
+			}
+		}
+		for current != nil && current != z.head && current.score >= last {
+			result = append(result, current.member)
+			current = current.previous
+		}
 	}
 	return result
 }
 
-// Rank 返回指定成员的排名（1-based），不存在返回 0
+func (z *ZSet) rankLocked(member string) int {
+	score, ok := z.tbl[member]
+	if !ok {
+		return 0
+	}
+	current := z.head
+	rank := 0
+	for i := z.level - 1; i >= 0; i-- {
+		for next := current.links[i].next; next != nil && (nodeBefore(next, score, member) || (next.score == score && next.member == member)); next = current.links[i].next {
+			rank += current.links[i].span
+			current = next
+		}
+		if current != z.head && current.member == member {
+			return rank
+		}
+	}
+	return 0
+}
+
+// Rank returns the member's 1-based ascending rank, or zero when absent.
 func (z *ZSet) Rank(member string) int {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
-
-	score, ex := z.tbl[member]
-	if !ex {
-		return 0
-	}
-	rank := C.slGetRank(z.sl, C.double(score), newslobj(member))
-	return int(rank)
+	return z.rankLocked(member)
 }
 
-// RevRank 返回指定成员的逆序排名（1-based），不存在返回 0
+// RevRank returns the member's 1-based descending rank, or zero when absent.
 func (z *ZSet) RevRank(member string) int {
-	rank := z.Rank(member)
-	if rank != 0 {
-		rank = z.reverseRank(rank)
+	z.mu.RLock()
+	defer z.mu.RUnlock()
+	rank := z.rankLocked(member)
+	if rank == 0 {
+		return 0
 	}
-	return rank
+	return z.length - rank + 1
 }
 
-// deleteByRank 删除指定排名范围内的成员，返回删除数量
-func (z *ZSet) deleteByRank(from, to int) int {
-	if from > to {
-		from, to = to, from
+// deleteRanksLocked removes a contiguous range using one predecessor search.
+func (z *ZSet) deleteRanksLocked(first, last int) int {
+	var path [maxLevel]*node
+	current := z.head
+	traversed := 0
+	for i := z.level - 1; i >= 0; i-- {
+		for current.links[i].next != nil && current.links[i].span < first-traversed {
+			traversed += current.links[i].span
+			current = current.links[i].next
+		}
+		path[i] = current
 	}
-	members := z.Range(from, to)
-	for _, member := range members {
-		z.Rem(member)
+	removed := 0
+	for item := path[0].links[0].next; item != nil && removed < last-first+1; {
+		next := item.links[0].next
+		z.unlinkLocked(item, &path)
+		delete(z.tbl, item.member)
+		removed++
+		item = next
 	}
-	return len(members)
+	return removed
 }
 
-// func (z *zset) deleteByRank(from, to int) int {
-// 	if from > to {
-// 		from, to = to, from
-// 	}
-
-// 	// 将 slice 中的 data 指针指向的对象 Pin 住
-// 	var pinner runtime.Pinner
-// 	// defer pinner.Unpin()
-// 	pinner.Pin(&z)
-
-// 	return int(C.slDeleteByRank(z.sl, C.uint(from), C.uint(to), unsafe.Pointer(z)))
-// }
-
-// //export delCb
-// func delCb(p unsafe.Pointer, obj *C.slobj) {
-// 	z := (*zset)(p)
-// 	member := C.GoStringN(obj.ptr, C.int(obj.length))
-// 	delete(z.tbl, member)
-// }
-
-// Limit 保留前 count 个成员，其余删除，返回删除数量
+// Limit retains the lowest count members, returning the number removed.
+// A negative count is treated as zero. The entire trim is atomic.
 func (z *ZSet) Limit(count int) int {
-	total := z.Count()
-	if total <= count {
+	z.mu.Lock()
+	defer z.mu.Unlock()
+	count = max(0, count)
+	if count >= z.length {
 		return 0
 	}
-	return z.deleteByRank(count+1, total)
+	return z.deleteRanksLocked(count+1, z.length)
 }
 
-// RevLimit 保留后 count 个成员，其余删除，返回删除数量
+// RevLimit retains the highest count members, returning the number removed.
+// A negative count is treated as zero. The entire trim is atomic.
 func (z *ZSet) RevLimit(count int) int {
-	total := z.Count()
-	if total <= count {
+	z.mu.Lock()
+	defer z.mu.Unlock()
+	count = max(0, count)
+	if count >= z.length {
 		return 0
 	}
-	from := z.reverseRank(count + 1)
-	to := z.reverseRank(total)
-	return z.deleteByRank(from, to)
+	return z.deleteRanksLocked(1, z.length-count)
 }
 
-// Dump 打印当前有序集合的内容（调试用）
+// Dump prints a diagnostic snapshot to stdout. The text format is not an API.
 func (z *ZSet) Dump() {
 	z.mu.RLock()
 	defer z.mu.RUnlock()
-
-	C.slDump(z.sl)
+	if z.head == nil {
+		return
+	}
+	rank := 1
+	for item := z.head.links[0].next; item != nil; item = item.links[0].next {
+		fmt.Printf("node %d: score:%f, member:%s\n", rank, item.score, item.member)
+		rank++
+	}
 }

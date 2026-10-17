@@ -16,16 +16,30 @@
 - [stretchr/testify](https://github.com/stretchr/testify)
 - [golang.org/x/exp](https://go.googlesource.com/exp)
 
-## 历史内嵌内容：来源待确认
+## 内嵌开源组件
 
-以下项目需要维护者结合原始引入记录确认来源、版本与授权，再补入相应版权和许可证全文：
+### pkg/skiplist
 
-| 路径 | 当前证据与需要确认的内容 |
-| --- | --- |
-| `pkg/skiplist/skiplist.go`、`type.go` | 常量、结构和注释与 [sean-public/fast-skiplist](https://github.com/sean-public/fast-skiplist) 存在相似之处，这是来源线索，尚未确认实际引入版本或中间 fork。 |
-| `pkg/go-zset/skiplist.c`、`skiplist.h` | 本地注释说明实现类似 Redis；[xjdrew/lua-zset](https://github.com/xjdrew/lua-zset) 提供了相似实现，其 README 说明跳表来自 Redis。实际引入链、版本及各方授权仍需确认。 |
-| `pkg/sensitive-word/sensitive_word.json` | 仓库没有说明词表的原始来源、生成方式或许可，需确认是否为原创或取得可再分发授权。 |
+- 上游项目：[sean-public/fast-skiplist](https://github.com/sean-public/fast-skiplist)。
+- 本地派生源码：`pkg/skiplist/skiplist.go`、`pkg/skiplist/type.go`。
+- 上游许可：MIT，版权声明 `Copyright (c) 2017 sean`；全文保留于
+  [pkg/skiplist/LICENSE](pkg/skiplist/LICENSE)，派生源码保留相应来源说明。
+- 2026-10-18 核对参考：上游 commit
+  [`d7f7945b944e5e211d906cbc4b08a07153d66ecb`](https://github.com/sean-public/fast-skiplist/tree/d7f7945b944e5e211d906cbc4b08a07153d66ecb)，
+  [对应 LICENSE](https://github.com/sean-public/fast-skiplist/blob/d7f7945b944e5e211d906cbc4b08a07153d66ecb/LICENSE)。
+  历史最初引入的 commit 与可能的中间 fork 未记录，此 commit 仅用于本次来源和许可核对。
+- 本地定制：将 `float64` 键改为 `*big.Float` 并使用 `Cmp` 比较；迁移至
+  `math/rand/v2` / PCG；增加 `RangeVals` 与 `RankIndex` 辅助方法。
+  具体说明见 [包文档](pkg/skiplist/README.md)。
 
-代码相似性不能单独证明来源或授权，不据此给这些内容补写猜测的作者、年份或许可。
-完成来源核对前，不应宣称上述历史内嵌内容已统一获得 MIT 授权。
+本包是上游开源实现的本地定制版本，使用与再分发时须保留上游版权及许可通知。
 后续引入的第三方代码和数据必须在引入时记录上游地址、版本、修改范围与许可。
+
+## 已移除的内容
+
+`pkg/go-zset/skiplist.c`、`skiplist.h` 已由纯 Go 实现替换。历史 C 源码说明其实现类似 Redis，
+与 [xjdrew/lua-zset](https://github.com/xjdrew/lua-zset) 的代码存在来源线索；历史引入链、版本
+及授权仍未确认。替换不代表历史版本的来源与授权已经完成核对。
+
+`pkg/sensitive-word/sensitive_word.json` 及其加载组件已移除。该历史词表的原始来源、
+生成方式和许可未得到确认；移除不代表已确认历史版本的再分发授权。当前版本不再包含该词表。

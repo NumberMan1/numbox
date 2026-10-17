@@ -13,22 +13,23 @@ Bug 报告请附上版本、Go 版本、运行环境及不依赖私有服务的�
 
 要求 Go 1.25.1 或以上版本，模块路径为 `github.com/NumberMan1/numbox`。
 
-`pkg/go-zset` 通过 CGo 编译 C 跳表，完整检查需要启用 CGo 和可用的 C 编译器。
-该 C 实现使用 POSIX `random()`，目前 CI 在 Ubuntu 和 macOS 上运行；
-Windows 完整构建建议使用 WSL。其他工具包可按需单独导入，不会因此编译 go-zset。
+`pkg/go-zset` 使用纯 Go 跳表，不再依赖 C 编译器或 POSIX API。所有组件均可在关闭 CGo
+时构建，CI 配置覆盖 Ubuntu、macOS 和 Windows。`go test -race` 自身仍要求启用 CGo
+和对应平台的工具链，这与库实现是否使用 CGo 无关。
 
 在仓库根目录运行：
 
 ```sh
 go mod download all
+CGO_ENABLED=0 go build ./...
 go test -race -count=1 ./...
 go vet ./...
 git diff --check
 ```
 
 添加或删除依赖时运行 `go mod tidy`，一并提交 `go.mod` 与 `go.sum`；
-普通改动不要顺带升级无关依赖。没有 C 编译器时可以先检查所修改的纯 Go 包，
-但这不能代替 Ubuntu 上的完整 CI。
+普通改动不要顺带升级无关依赖。没有竞态检测工具链时先运行普通测试，
+并在交付中明确未运行竞态检测的原因。
 
 ## 修改约定
 

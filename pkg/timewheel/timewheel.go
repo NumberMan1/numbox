@@ -7,7 +7,6 @@ import (
 	"container/list"
 	"errors"
 	"log/slog"
-	"reflect"
 	"runtime/debug"
 	"time"
 )
@@ -221,7 +220,13 @@ func (w *TimeWheel[K]) call(task *wheelTask[K], now time.Time) {
 
 // Interface keys can hold non-comparable values despite K's comparable constraint.
 // NaN-containing keys are rejected because they cannot be looked up or canceled.
-func validKey[K comparable](key K) bool {
-	value := reflect.ValueOf(key)
-	return (!value.IsValid() || value.Comparable()) && key == key
+func validKey[K comparable](key K) (valid bool) {
+	// Interface keys, including nested ones, can contain uncomparable values.
+	// Recover only around equality; ordinary typed keys need no reflection.
+	defer func() {
+		if recover() != nil {
+			valid = false
+		}
+	}()
+	return key == key
 }

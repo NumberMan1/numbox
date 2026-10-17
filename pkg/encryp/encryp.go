@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/NumberMan1/numbox/pkg/env"
+	"github.com/NumberMan1/numbox/utils/env"
 	"github.com/dgrijalva/jwt-go"
 )
 

@@ -17,9 +17,8 @@ go get github.com/NumberMan1/numbox@latest
 可将 `@latest` 替换为 [已有 tag](https://github.com/NumberMan1/numbox/tags) 以固定版本。
 项目仍处于 v0 阶段，升级前请阅读 [变更记录](CHANGELOG.md) 与版本之间的差异。
 
-`pkg/go-zset` 依赖 **CGo 和 C 编译器**，C 实现使用 POSIX `random()`。
-完整 CI 使用 Ubuntu 和 macOS；Windows 完整开发建议使用 WSL。
-不使用该包时，可以正常按需导入其他纯 Go 工具包。
+所有组件均可在 `CGO_ENABLED=0` 下构建，`pkg/go-zset` 已改为纯 Go，支持原生 Windows。
+CI 配置覆盖 Ubuntu、macOS 和 Windows；竞态检测本身仍需要 Go 工具链的 CGo 支持。
 
 ## 快速开始
 
@@ -47,21 +46,20 @@ func main() {
 | 导入路径（模块路径后的部分） | 用途 |
 | --- | --- |
 | `errors` | 错误码、自定义错误与标准错误判断 |
-| [`pkg/utils`](pkg/utils/README.md) | 字符串、切片、JSON、随机数等通用函数 |
+| [`utils/*`](utils/README.md) | 按职责拆分的转换、切片、Map、JSON、随机、时间解析等工具子包 |
 | `pkg/bitmap` | 位图 |
 | `pkg/collection` | 泛型集合 |
 | [`pkg/dag`](pkg/dag/README.md) | 有向无环图 |
 | [`pkg/encryp`](pkg/encryp/README.md) | JWT token 工具 |
-| [`pkg/env`](pkg/env/README.md) | 环境变量读取 |
-| `pkg/go-zset` | 基于 CGo 的有序集合 |
+| [`utils/env`](utils/env/README.md) | 环境变量读取 |
+| [`pkg/go-zset`](pkg/go-zset/README.md) | 纯 Go、并发安全的带排名有序集合 |
 | `pkg/idcard` | 身份证校验与解析 |
 | [`pkg/lock`](pkg/lock/README.md) | 不自动过期的 token 锁与 context 协作取消任务 |
-| [`pkg/percent`](pkg/percent/README.md) | 千分比工具 |
-| `pkg/sensitive-word` | 内嵌词表校验，包名为 `sensitiveword` |
+| [`utils/percent`](utils/percent/README.md) | 千分比工具 |
 | [`pkg/skiplist`](pkg/skiplist/README.md) | 以 `big.Float` 为 key 的跳表 |
 | [`pkg/time`](pkg/time/README.md) | 毫秒时间戳 |
 | `pkg/timewheel` | 时间轮调度 |
-| `pkg/uuid` | UUID 工具 |
+| `utils/uuid` | UUID 工具 |
 | `pkg/weight` | 权重池、随机抽样与保底机制 |
 | [`pkg/matcher`](pkg/matcher/README.md) | 字符串匹配 |
 | [`pkg/safego`](pkg/safego/README.md) | goroutine 启动与 panic 处理 |
@@ -69,7 +67,11 @@ func main() {
 | [`pkg/version`](pkg/version/README.md) | 版本解析与比较 |
 | [`pkg/event-bus`](pkg/event-bus/README.md) | 事件总线类型定义 |
 
-新版工具统一位于 `pkg/*`，旧版 `utils/*` 导入路径需要迁移；公开函数的更名见各包 README。
+工具按职责位于 `utils/convutil`、`utils/sliceutil`、`utils/maputil`、`utils/jsonutil` 等子包；
+根 `utils` 没有可导入的 Go 包。有状态组件、数据结构和算法保留在 `pkg/*`。
+原 `pkg/utils` 或根 `utils` 的使用方需按函数职责更新导入，详见 [工具索引](utils/README.md)
+和 [迁移说明](docs/utils-migration.md)。
+内嵌敏感词组件已移除，需要匹配时显式构造 `pkg/matcher` 并提供自己的词表。
 锁不再自动过期，迁移规则见 [lock 说明](pkg/lock/README.md)。
 
 具体 API 见 [Go 文档](https://pkg.go.dev/github.com/NumberMan1/numbox) 和对应包源码。
@@ -78,10 +80,11 @@ func main() {
 
 ## 开发与验证
 
-在已启用 CGo 并安装 C 编译器的环境中执行：
+在仓库根目录执行（竞态检测本身需要 CGo 工具链）：
 
 ```sh
 go mod download all
+CGO_ENABLED=0 go build ./...
 go test -race -count=1 ./...
 go vet ./...
 git diff --check
