@@ -31,8 +31,15 @@ CGO_ENABLED=1 go build ./...
 
 这是一个 Go 工具库（模块 `github.com/NumberMan1/numbox`），提供可复用的数据结构和辅助函数。各包之间相互独立，没有统一的框架将它们耦合在一起，但存在以下内部依赖关系：
 
-- `pkg/sensitive-word` → `pkg/matcher`（词表匹配）、`pkg/utils`（JSON 反序列化）
-- `pkg/encryp` → `pkg/env`（获取 JWT 默认密钥）
+- `utils/convutil`、`utils/maputil` → `utils/typeutil`（数值约束）
+- `utils/sliceutil` → `utils/maputil`（集合索引）
+- `utils/percent`、`pkg/weight` → `utils/convutil`（转换和配置解析）
+- `utils/jsonutil` → `utils/assertutil`（保持 JSON 失败时 panic 的行为）
+- `pkg/encryp` → `utils/env`（获取 JWT 默认密钥）
+
+工具按职责放在 `utils/*` 子包，根 `utils` 仅作目录索引，不提供汇总包或转发 API。
+整数转换、集合、JSON、随机、时间解析和断言分别维护，避免不必要的传递依赖。
+有状态组件、数据结构和算法仍位于 `pkg/*`。不再内嵌敏感词表；`pkg/matcher` 只处理调用方提供的词表。
 
 ### 关键设计模式
 
@@ -56,7 +63,7 @@ CGO_ENABLED=1 go build ./...
 
 - `errors/` — 自定义 `CodeError` 类型，携带错误码（`Code int32`）以及可选的内部错误和堆栈信息。使用 `errors.ToError(code, data)` 将任意值转换为 CodeError。
 - `pkg/stackerr` — `StackError` 通过 `pkg/errors` 为错误包裹堆栈跟踪信息。`FormatStackError()` 是捕获 panic 并附加上下文的主要入口。
-- `pkg/utils` — `Must(err)` 和 `Assert(isOk, err)` 是遇错即 panic 的辅助函数。`WithRecover()` 用 recover 块包裹函数执行。
+- `utils/assertutil` — `Must(err)` 和 `Assert(isOk, err)` 是遇错即 panic 的辅助函数。`WithRecover()` 用 recover 块包裹函数执行。
 
 ### Go 版本及依赖
 

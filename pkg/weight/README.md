@@ -2,6 +2,9 @@
 
 基于累计权重的抽样工具，提供普通权重池、公平抽样和按未命中次数触发的保底池。显式传入种子可复现相同操作序列。
 
+权重配置文本解析也位于此包：ParseWeightItems、ParseWeightMultiItems、ParseWeightMultiOptions、
+ParseFixedTotalWeightPool，保留原有默认权重、分隔符及宽松解析行为。ID 数值约束位于 utils/typeutil。
+
 ## 示例
 
 ```go

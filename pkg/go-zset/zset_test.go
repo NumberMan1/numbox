@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/NumberMan1/numbox/pkg/utils"
+	"github.com/NumberMan1/numbox/utils/randutil"
 )
 
 func equal(a []string, b []string) bool {
@@ -112,7 +112,7 @@ func BenchmarkZset(b *testing.B) {
 		// }
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				z.Add(float64(utils.RandInt[int](1, 100000)), strconv.Itoa(utils.RandInt[int](1, 100000)))
+				z.Add(float64(randutil.RandInt[int](1, 100000)), strconv.Itoa(randutil.RandInt[int](1, 100000)))
 				z.RevLimit(10000)
 			}
 		})
@@ -126,7 +126,7 @@ func BenchmarkZset(b *testing.B) {
 		// }
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				z.Add(float64(utils.RandInt[int](1, 100000)), strconv.Itoa(utils.RandInt[int](1, 100000)))
+				z.Add(float64(randutil.RandInt[int](1, 100000)), strconv.Itoa(randutil.RandInt[int](1, 100000)))
 				z.RevLimit(10000)
 			}
 		})
