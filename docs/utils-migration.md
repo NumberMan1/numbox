@@ -65,7 +65,7 @@ IsStringValid 的禁止标点策略，使用方必须显式恢复自己的业务
 生产代码直接使用 reflect 的整数解析和时间轮 key 校验已替换，测试中的 reflect 用于
 兼容性断言和旧实现性能对照。JSON 仍依赖 json-iterator，不承诺动态序列化完全没有反射。
 可在 utils/convutil 与 pkg/timewheel 运行基准，比较旧实现的耗时、字节与分配次数。
-Windows 的 go-zset 使用 POSIX random，需要在 Linux/macOS 做完整构建验证。
+go-zset 现已替换为纯 Go 实现，原 Windows/POSIX 限制已解除；普通构建支持关闭 CGo。
 
 2026-10-18 拆包前的转换优化对照：Windows/amd64、Go 1.27.2、Ryzen 7 5800H，
 `-cpu=1 -benchtime=400ms -count=3`，下表为三次测量中位数。

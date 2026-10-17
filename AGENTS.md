@@ -23,8 +23,8 @@ go test -run TestLocker ./pkg/lock/...
 # 运行性能基准测试
 go test -bench=. ./pkg/lock/...
 
-# 构建 (pkg/go-zset 依赖 CGO)
-CGO_ENABLED=1 go build ./...
+# 无 CGo 构建；竞态检测本身仍需要工具链启用 CGo
+CGO_ENABLED=0 go build ./...
 ```
 
 ## 架构概览
@@ -57,7 +57,7 @@ CGO_ENABLED=1 go build ./...
 
 **时间轮（`pkg/timewheel`）** 采用 Orbit 的泛型主动推进实现。由同一个 owner 调用 `Schedule/Cancel/Reset/Clear/Advance`，不提供隐式锁、后台 goroutine 或旧版 `Start/Stop/Task` 接口。回调串行执行，截止时间向上取整，panic 默认通过 slog 记录。外部协程应投递到同一执行队列。详见 `pkg/timewheel/README.md`。
 
-**go-zset（`pkg/go-zset`）** 通过 cgo 封装了 C 实现的跳表——需要 `CGO_ENABLED=1`。如果需要纯 Go 方案，可使用 `pkg/skiplist`（基于 `big.Float` 键，适合任意精度的场景）。
+**go-zset（`pkg/go-zset`）** 使用纯 Go 成员索引与带排名跨度的跳表，保留 1-based 排名、按分数/成员字节序排序及范围 API。所有公开操作有锁，整个裁剪操作原子执行；NaN 分数会 panic。支持 Windows，普通构建不需要 CGo。`pkg/skiplist` 是独立的 big.Float 键索引，不是此组件的替代入口。
 
 ### 错误处理模式
 

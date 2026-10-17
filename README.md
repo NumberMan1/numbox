@@ -17,9 +17,8 @@ go get github.com/NumberMan1/numbox@latest
 可将 `@latest` 替换为 [已有 tag](https://github.com/NumberMan1/numbox/tags) 以固定版本。
 项目仍处于 v0 阶段，升级前请阅读 [变更记录](CHANGELOG.md) 与版本之间的差异。
 
-`pkg/go-zset` 依赖 **CGo 和 C 编译器**，C 实现使用 POSIX `random()`。
-完整 CI 使用 Ubuntu 和 macOS；Windows 完整开发建议使用 WSL。
-不使用该包时，可以正常按需导入其他纯 Go 工具包。
+所有组件均可在 `CGO_ENABLED=0` 下构建，`pkg/go-zset` 已改为纯 Go，支持原生 Windows。
+CI 配置覆盖 Ubuntu、macOS 和 Windows；竞态检测本身仍需要 Go 工具链的 CGo 支持。
 
 ## 快速开始
 
@@ -53,7 +52,7 @@ func main() {
 | [`pkg/dag`](pkg/dag/README.md) | 有向无环图 |
 | [`pkg/encryp`](pkg/encryp/README.md) | JWT token 工具 |
 | [`utils/env`](utils/env/README.md) | 环境变量读取 |
-| `pkg/go-zset` | 基于 CGo 的有序集合 |
+| [`pkg/go-zset`](pkg/go-zset/README.md) | 纯 Go、并发安全的带排名有序集合 |
 | `pkg/idcard` | 身份证校验与解析 |
 | [`pkg/lock`](pkg/lock/README.md) | 不自动过期的 token 锁与 context 协作取消任务 |
 | [`utils/percent`](utils/percent/README.md) | 千分比工具 |
@@ -81,10 +80,11 @@ func main() {
 
 ## 开发与验证
 
-在已启用 CGo 并安装 C 编译器的环境中执行：
+在仓库根目录执行（竞态检测本身需要 CGo 工具链）：
 
 ```sh
 go mod download all
+CGO_ENABLED=0 go build ./...
 go test -race -count=1 ./...
 go vet ./...
 git diff --check
